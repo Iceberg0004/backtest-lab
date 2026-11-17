@@ -16,6 +16,9 @@ from numba import njit
 from . import engine as E, indicators as ind, robust as R
 
 FEATURE_LABELS = {
+    "fundz": "Funding z-score (300 candle)", "fund": "Funding rate", "flow6": "Order flow taker 6 candle",
+    "flow24": "Order flow taker 24 candle", "oi6": "Perubahan open interest 6 candle", "oi24": "Perubahan open interest 24 candle",
+    "lsr": "Rasio long/short akun", "lsr24": "Perubahan rasio long/short 24 candle",
     "r1": "Return 1 candle", "r3": "Return 3 candle", "r6": "Return 6 candle", "r12": "Return 12 candle",
     "r24": "Return 24 candle", "r48": "Return 48 candle", "atrp": "ATR % harga", "atr_rel": "ATR vs rata-rata 100",
     "rsi7": "RSI 7", "rsi14": "RSI 14", "rsi28": "RSI 28", "adx": "ADX 14", "bbw": "Lebar Bollinger 20",
@@ -61,6 +64,21 @@ def features(cc):
             f["hsin"] = np.sin(2 * np.pi * cc.hour / 24)
             f["hcos"] = np.cos(2 * np.pi * cc.hour / 24)
         f["dow"] = cc.dow / 6.0
+        av = getattr(cc, "avail", set())
+        if av:
+            from . import engine as _E
+            if "fund" in av:
+                f["fundz"] = _E.fund_z(cc, 300)
+                f["fund"] = cc.x["fund"] * 1e4
+            if "taker" in av:
+                f["flow6"] = _E.flow_ratio(cc, 6)
+                f["flow24"] = _E.flow_ratio(cc, 24)
+            if "oi" in av:
+                f["oi6"] = _E.oi_change(cc, 6)
+                f["oi24"] = _E.oi_change(cc, 24)
+            if "lsr" in av:
+                f["lsr"] = np.log(cc.x["lsr"])
+                f["lsr24"] = np.log(cc.x["lsr"] / ind.shift(cc.x["lsr"], 24))
         if cc.has_volume:
             f["vrel"] = np.log(np.maximum(cc.v, 1e-12) / np.maximum(ind.sma(cc.v, 20), 1e-12))
     names = list(f)

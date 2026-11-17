@@ -439,7 +439,7 @@ def render_live(load_closed, load_raw, cost_for, symbols_for):
                 d = lst[k]
                 for sym in [d["symbol"]] + [s for s in extra if s != d["symbol"]]:
                     try:
-                        raw = load_raw(d["source"], sym, d["tf"])
+                        raw = load_raw(d["source"], sym, d["tf"], E.uses_deriv(d["family"], d["params"]))
                         closed = load_closed(d["source"], sym, d["tf"], raw)
                         price = float(closed["close"].iloc[-1])
                         cf, ca = cost_for(d["source"], sym, price)

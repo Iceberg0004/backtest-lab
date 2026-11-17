@@ -45,11 +45,13 @@ cases = []
 rng = np.random.default_rng(2026)
 mk = ["binance:BTCUSDT", "dukascopy:EURUSD", "dukascopy:XAUUSD"]
 for fam in E.FAMILIES:
+    if E.FAMILIES[fam].get("needs"):      # derivatives families have no Pine version
+        continue
     for r in range(PER):
         src, sym = mk[(len(cases)) % 3].split(":")
         df, cc = data(src, sym)
         for _ in range(50):
-            p = E.sample_params(fam, rng, 60, combo=True)
+            p = E.drop_unavailable(E.sample_params(fam, rng, 60, combo=True), cc)
             _, tr = E.run(fam, p, cc, 0, len(df), "both", 0.0, 0.0)
             if len(tr["ent"]) >= 5:
                 break

@@ -124,7 +124,17 @@ def _table(rows, live_strategy):
     return "\n".join(L)
 
 
+class NoPine(ValueError):
+    pass
+
+
+PINE_DERIV_MSG = ("Strategi ini memakai data derivatif kripto (funding, open interest, long/short atau volume taker) yang "
+                  "tidak tersedia di Pine Script TradingView, jadi tidak bisa diekspor ke Pine.")
+
+
 def to_pine(fam, p, direction, title, symbol, tf, cost_pct, leverage=1.0, stats_note="", table_rows=None):
+    if E.uses_deriv(fam, p):
+        raise NoPine(PINE_DERIV_MSG)
     p = E.full_params(p)
     name = E.FAMILIES[fam]["name"]
     desc = E.describe(fam, p, direction)

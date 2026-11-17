@@ -17,7 +17,7 @@ from plotly.subplots import make_subplots
 
 from core.data import SOURCES, KEY_SOURCES, closed_only, TF_MINUTES
 from core import engine as E
-from core.pine import to_pine
+from core.pine import to_pine, NoPine
 from core.prompt import parse
 from core import robust as R, realism as X
 import ui_extra as U
@@ -52,7 +52,7 @@ defaults = dict(source="binance", symbol="BTCUSDT", tf="1h", direction="both", o
                 min_pf=1.3, min_wr=0.0, max_dd=30.0, min_trades=50, families=list(E.FAMILIES),
                 n_variants=3000, time_budget=120, mode="ketat", algo="random", combo=False, min_wf=60, min_stab=60, oos_min_pf=1.1, lev=1.0,
                 fee=0.10, slip=0.05, spread=1.0, fx_comm=0.0, fx_slip=0.2, refresh=15, prompt="",
-                use_funding=False, use_swap=False, swap_long=2.0, swap_short=-0.5)
+                use_funding=False, use_deriv=False, use_swap=False, swap_long=2.0, swap_short=-0.5)
 for k, v in defaults.items():
     ss.setdefault(k, v)
 ss.families = [f for f in ss.families if f in E.FAMILIES]
@@ -108,21 +108,48 @@ with st.sidebar:
     if _cap and start_date < dt.date.today() - dt.timedelta(days=_cap):
         start_date = dt.date.today() - dt.timedelta(days=_cap)
         st.caption(f"Timeframe {tf} dibatasi {_cap} hari terakhir (mulai {start_date:%d %b %Y}) supaya tidak kehabisan memori.")
+    if ss.source == "binance":
+        st.checkbox("📊 Pakai data derivatif (funding, open interest, long/short, order flow)", key="use_deriv",
+                    help="Data gratis dari Binance Futures dan arsip data.binance.vision. Dipakai sebagai filter, jenis strategi baru dan fitur ML. "
+                         "Pertama kali bisa 2-4 menit per koin (mengunduh riwayat open interest harian), berikutnya cepat. "
+                         "Open interest & long/short tersedia sejak ±Sep 2020 (API Binance sendiri hanya menyimpan 30 hari, jadi riwayat lama "
+                         "diambil dari arsip harian). Data likuidasi tidak ada sumber riwayat gratis, jadi tidak dipakai.")
     st.slider("Auto-refresh chart (detik)", 5, 120, key="refresh")
     st.caption("Aplikasi pribadi, non-komersial. Backtest bukan jaminan hasil.")
 
 
+@st.cache_data(ttl=120, show_spinner=False, max_entries=6)
+def load_deriv(symbol, tf, start):
+    from core import deriv as D
+    base = SOURCES["binance"].get(symbol, tf, start=pd.Timestamp(start, tz="UTC"), refresh=False)
+    e, info = D.enrich(base, symbol, tf)
+    return e[D.COLS], info
+
+
 @st.cache_data(ttl=5, show_spinner=False)
-def load(source, symbol, tf, start):
-    return SOURCES[source].get(symbol, tf, start=pd.Timestamp(start, tz="UTC"), refresh=True)
+def load(source, symbol, tf, start, deriv=False):
+    df = SOURCES[source].get(symbol, tf, start=pd.Timestamp(start, tz="UTC"), refresh=True)
+    if deriv and source == "binance":
+        try:
+            x, info = load_deriv(symbol, tf, start)
+            df = df.join(x, how="left")
+            df.attrs["deriv_info"] = info
+        except Exception as e:  # never break the app because of the extra data
+            df.attrs["deriv_info"] = {"error": str(e)}
+    return df
+
+
+def deriv_on():
+    return bool(ss.get("use_deriv")) and ss.source == "binance"
 
 
 def get_data(show=True):
     try:
         if show:
-            with st.spinner(f"Mengambil data {symbol} {tf} (pertama kali bisa agak lama, berikutnya hanya candle baru)..."):
-                return load(ss.source, symbol, tf, start_date)
-        return load(ss.source, symbol, tf, start_date)
+            with st.spinner(f"Mengambil data {symbol} {tf} (pertama kali bisa agak lama, berikutnya hanya candle baru)" +
+                            (" + data derivatif (pertama kali 2-4 menit)" if deriv_on() else "") + "..."):
+                return load(ss.source, symbol, tf, start_date, deriv_on())
+        return load(ss.source, symbol, tf, start_date, deriv_on())
     except Exception as e:
         st.error(f"Gagal mengambil data: {e}")
         return None
@@ -402,6 +429,10 @@ with t_search:
     d1.select_slider("Jumlah variasi yang dicoba", [500, 1000, 2000, 3000, 5000, 10000, 20000], key="n_variants")
     d2.select_slider("Batas waktu (detik)", [30, 60, 120, 300, 600], key="time_budget")
 
+    if deriv_on():
+        st.caption("📊 Data derivatif aktif: 3 jenis strategi baru (funding ekstrem, open interest vs harga, order flow taker) dan "
+                   "3 filter tambahan (funding, order flow, open interest) ikut dicari. Strategi yang memakainya tidak bisa diekspor ke Pine. "
+                   "Open interest & long/short baru ada sejak ±Sep 2020, funding sejak Sep 2019; sebelum itu filter/strategi ini tidak memberi sinyal.")
     if st.button("🚀 Mulai cari strategi", type="primary", width='stretch'):
         df = get_data()
         if df is not None and ss.families:
@@ -415,7 +446,7 @@ with t_search:
                            min_pf=ss.min_pf, min_wr=ss.min_wr / 100, max_dd=ss.max_dd / 100, min_trades=ss.min_trades,
                            min_wf=ss.min_wf / 100, min_stab=ss.min_stab / 100, oos_min_pf=ss.oos_min_pf,
                            lev=ss.lev, seed=int(time.time()) % 100000, pine_cost=pine_cost, carry=carry_cfg(),
-                           mode=ss.mode, algo=ss.algo, combo=bool(ss.combo), tf_min=TF_MINUTES.get(tf, 60))
+                           mode=ss.mode, algo=ss.algo, combo=bool(ss.combo), tf_min=TF_MINUTES.get(tf, 60), deriv=deriv_on())
                 bar = st.progress(0.0, text="Menyiapkan data...")
                 cc0, carry_info = make_cache(dfc, cfg, symbol, tf)
                 def prog(f, tested, npass):
@@ -428,6 +459,7 @@ with t_search:
                 bar.progress(1.0, text="Menghitung Deflated Sharpe dan peluang overfit (PBO)...")
                 res_new = dict(out=out, meta=meta, cfg=cfg, symbol=symbol, tf=tf, source=ss.source, id=f"{time.time():.3f}",
                                start=str(start_date), carry_info=carry_info)
+                res_new["deriv_info"] = df.attrs.get("deriv_info")
                 U.after_search(res_new, cc0)
                 bar.progress(1.0, text=f"Selesai: {meta['tested']:,} variasi diuji dalam {meta['seconds']:.1f} detik")
                 ss.res = res_new
@@ -504,6 +536,21 @@ with t_res:
         st.caption(f"{res['symbol']} {res['tf']} · in-sample {to_wib([meta['start_time']])[0]:%d %b %Y} – "
                    f"{to_wib([meta['split_time']])[0]:%d %b %Y} · data unseen sejak {to_wib([meta['split_time']])[0]:%d %b %Y %H:%M} WIB · "
                    f"{meta['tested']:,} variasi dalam {meta['seconds']:.1f} detik")
+        if res["cfg"].get("deriv"):
+            if not deriv_on():
+                st.warning("Hasil ini dicari dengan data derivatif. Nyalakan lagi '📊 Pakai data derivatif' di sidebar, "
+                           "kalau tidak strategi yang memakai funding/OI/order flow tidak akan punya trade.")
+            di = res.get("deriv_info") or {}
+            with st.expander("📊 Data derivatif yang dipakai"):
+                if "error" in di:
+                    st.error(f"Gagal memuat data derivatif: {di['error']}")
+                for k_, lab_ in (("taker", "Volume taker (order flow)"), ("fund", "Funding rate"), ("oi", "Open interest & rasio long/short")):
+                    v_ = di.get(k_)
+                    if v_:
+                        st.markdown(f"- **{lab_}**: " + (f"sejak {pd.Timestamp(v_['frm']).tz_convert(TZ):%d %b %Y}, " if v_.get("frm") is not None else "") +
+                                    f"ada di {v_.get('coverage', 0) * 100:.0f}% candle · sumber: {v_.get('note', '-')}")
+                st.caption("Nilai tiap candle = data terakhir yang sudah ada SEBELUM candle tutup (tidak melihat masa depan). "
+                           "Data likuidasi tidak dipakai karena tidak ada sumber riwayat gratis.")
         rows = []
         for i, o in enumerate(res["out"]):
             im, om = o["is_m"], o["oos_m"]
@@ -571,7 +618,7 @@ with t_res:
             ctx = dict(o=o, res=res, cfg=cfg, cc=cc, dfc=dfc, n=n, split=split, is_start=is_start, skey=f"{res.get('id', '0')}_{ss.sel}",
                        carry_info=carry_info or res.get("carry_info"), symbols=SOURCES[res["source"]].symbols(),
                        cc_nocarry=E.Cache(dfc) if cfg.get("carry") else cc,
-                       load_symbol_raw=lambda s_: closed_only(SOURCES[res["source"]].get(s_, res["tf"], start=pd.Timestamp(start_date, tz="UTC"),
+                       load_symbol_raw=lambda s_: closed_only(load(res["source"], s_, res["tf"], start_date, bool(cfg.get("deriv")) and E.uses_deriv(o["fam"], o["params"])), res["tf"]) if bool(cfg.get("deriv")) else closed_only(SOURCES[res["source"]].get(s_, res["tf"], start=pd.Timestamp(start_date, tz="UTC"),
                                                                                       refresh=True), res["tf"]),
                        make_cache=lambda d_, s_: make_cache(d_, cfg if res["source"] == "binance" else None, s_, res["tf"])[0],
                        cost_for=lambda s_, px: cost_for(res["source"], s_, px))
@@ -668,16 +715,21 @@ with t_res:
                          ("Unseen PF / DD", f"{om['pf']:.2f} / {om['maxdd']*100:.1f}%"), ("Unseen trades", str(om["trades"])),
                          ("DSR", U.pct(tt.get("dsr", {}).get("dsr"), 0)),
                          ("Rapor", f"{g[1]} ({g[0]:.0f}/100)" if g[0] is not None else "-")]
-                strat, indi = to_pine(o["fam"], o["params"], cfg["direction"], f"{E.FAMILIES[o['fam']]['name']} #{ss.sel+1}",
-                                      tv_sym, res["tf"], cfg["pine_cost"], lev, note, trows)
-                st.markdown("**Cara pakai:** buka TradingView → Pine Editor → tempel kode → *Add to chart*. "
+                try:
+                    strat, indi = to_pine(o["fam"], o["params"], cfg["direction"], f"{E.FAMILIES[o['fam']]['name']} #{ss.sel+1}",
+                                          tv_sym, res["tf"], cfg["pine_cost"], lev, note, trows)
+                except NoPine as e:
+                    strat = indi = None
+                    st.warning(str(e) + " Simpan sebagai JSON untuk dipakai di tab 'Sinyal Live'.")
+                if strat:
+                  st.markdown("**Cara pakai:** buka TradingView → Pine Editor → tempel kode → *Add to chart*. "
                             "Versi **indicator** menghitung posisi sendiri dan **sama persis** dengan aplikasi (label Long/Short/TP1/SL/TP/Exit + alert). "
                             "Versi **strategy** memakai mesin order TradingView: kalau stop loss dan take profit tersentuh di candle yang sama, "
                             "TradingView menebak urutannya sendiri (aplikasi menganggap stop loss duluan), jadi angkanya bisa sedikit beda. "
                             "Jam sesi, hari, dan tren timeframe besar dihitung dari waktu UTC candle.")
-                e1, e2 = st.columns(2)
-                e1.download_button("⬇️ Pine strategy (.pine)", strat, f"strategy_{tv_sym}_{res['tf']}.pine", width='stretch')
-                e2.download_button("⬇️ Pine indicator (.pine)", indi, f"indicator_{tv_sym}_{res['tf']}.pine", width='stretch')
+                  e1, e2 = st.columns(2)
+                  e1.download_button("⬇️ Pine strategy (.pine)", strat, f"strategy_{tv_sym}_{res['tf']}.pine", width='stretch')
+                  e2.download_button("⬇️ Pine indicator (.pine)", indi, f"indicator_{tv_sym}_{res['tf']}.pine", width='stretch')
                 sj = U.strategy_json(o, res, tt)
                 j1, j2 = st.columns(2)
                 j1.download_button("💾 Simpan strategi (JSON)", sj, f"strategy_{tv_sym}_{res['tf']}_{o['fam']}_{ss.sel+1}.json", width='stretch',
@@ -693,10 +745,11 @@ with t_res:
                 if ss.get("report") and ss["report"][0] == rkey:
                     st.download_button("⬇️ Download laporan (.html)", ss["report"][1], f"laporan_{tv_sym}_{res['tf']}_{ss.sel+1}.html",
                                        mime="text/html", width='stretch')
-                with st.expander("Lihat kode Pine strategy"):
-                    st.code(strat, language="javascript")
-                with st.expander("Lihat kode Pine indicator"):
-                    st.code(indi, language="javascript")
+                if strat:
+                    with st.expander("Lihat kode Pine strategy"):
+                        st.code(strat, language="javascript")
+                    with st.expander("Lihat kode Pine indicator"):
+                        st.code(indi, language="javascript")
 
 def _res_data():
     res = ss.get("res")
@@ -730,17 +783,17 @@ with t_port:
         U.render_portfolio(*got)
 
 with t_cmp:
-    def _load_any(source, sym, tf_, start):
+    def _load_any(source, sym, tf_, start, deriv=False):
         st_ = pd.Timestamp(start).date() if start else start_date
-        return closed_only(load(source, sym, tf_, st_), tf_)
+        return closed_only(load(source, sym, tf_, st_, bool(deriv) and source == "binance"), tf_)
     U.render_compare(_load_any, cost_for, make_cache)
 
 with t_sig:
-    def _lv_raw(source, sym, tf_):
+    def _lv_raw(source, sym, tf_, deriv=False):
         need = int(TF_MINUTES[tf_] * 5200 / 1440 * (1.0 if source == "binance" else 1.5)) + 3
         cap = MAX_DAYS.get(source, {}).get(tf_)
         need = min(need, cap) if cap else need
-        return load(source, sym, tf_, dt.date.today() - dt.timedelta(days=need))
+        return load(source, sym, tf_, dt.date.today() - dt.timedelta(days=need), bool(deriv) and source == "binance")
     V.render_live(lambda source, sym, tf_, raw: closed_only(raw, tf_), _lv_raw, cost_for, lambda s_: SOURCES[s_].symbols())
 
 with t_help:

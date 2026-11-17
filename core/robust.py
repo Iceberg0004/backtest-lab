@@ -35,10 +35,10 @@ def _quick_search(cc, start, end, cfg, n_variants, rng, min_trades):
     among those meeting the user's targets, or None. Same sampler and engine as the main search."""
     best, best_any = None, None
     seen = set()
-    fams = E.allowed_families(cfg["families"], cc.tf_min, cc.has_volume) or list(cfg["families"])
+    fams = E.allowed_families(cfg["families"], cc.tf_min, cc.has_volume, getattr(cc, "avail", set())) or list(cfg["families"])
     for k in range(n_variants):
         fam = fams[k % len(fams)]
-        p = E.sample_params(fam, rng, cc.tf_min, bool(cfg.get("combo", False)))
+        p = E.drop_unavailable(E.sample_params(fam, rng, cc.tf_min, bool(cfg.get("combo", False))), cc)
         key = (fam, tuple(sorted(p.items())))
         if key in seen:
             continue
@@ -125,6 +125,9 @@ def permute_bars(df, rng, keep=0):
     no[s:] = o; nh[s:] = o + rh; nl[s:] = o + rl; nc[s:] = o + rc
     out = pd.DataFrame({"open": np.exp(no), "high": np.exp(nh), "low": np.exp(nl), "close": np.exp(nc),
                         "volume": df["volume"].to_numpy(float)}, index=df.index)
+    for col in ("taker_buy", "fund", "oi", "lsr", "top_lsr"):   # derivatives stay in time (like volume): the
+        if col in df.columns:                                    # shuffle breaks any real price <-> data link
+            out[col] = df[col].to_numpy(float)
     return out
 
 

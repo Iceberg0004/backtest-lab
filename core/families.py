@@ -25,10 +25,10 @@ def _cu(a, b):
 F = {}
 
 
-def fam(key, name, space, intraday=False, needs_volume=False, sub=None):
+def fam(key, name, space, intraday=False, needs_volume=False, sub=None, needs=None):
     def deco(cls):
         F[key] = dict(name=name, space=space, py=cls.py, pine=cls.pine, desc=cls.desc, intraday=intraday,
-                      needs_volume=needs_volume, sub=sub)
+                      needs_volume=needs_volume, sub=sub, needs=set(needs or ()))
         return cls
     return deco
 
@@ -735,3 +735,82 @@ class _:
     def desc(p):
         return (f"Beli saat harga membuat low lebih rendah tapi RSI({p['rsi_len']}) low lebih tinggi (bullish divergence, pivot {p['dv_piv']}), "
                 f"keluar saat RSI > {p['exit_level']}; short kebalikannya")
+
+
+# ------------------------------------------------------------------ crypto derivatives (Binance data, NOT exportable to Pine)
+def _no_pine(p):
+    return None
+
+
+def _flow(cc, n):
+    def f():
+        d = 2 * cc.x["taker_buy"] - cc.v
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return ind.sma(d, n) / ind.sma(cc.v, n)
+    return cc.get(("flow", n), f)
+
+
+@fam("fund_fade", "Funding ekstrem (lawan kerumunan)", {"z_len": [100, 300, 600], "z_thr": [1.5, 2.0, 2.5, 3.0], "exit_z": [0.0, 0.5], "trend": T4},
+     needs=("fund",))
+class _:
+    def py(p, cc):
+        x = cc.x["fund"]
+
+        def zf():
+            with np.errstate(invalid="ignore", divide="ignore"):
+                return (x - ind.sma(x, p["z_len"])) / ind.stdev(x, p["z_len"])
+        z = cc.get(("fundz", p["z_len"]), zf)
+        return (_cu(z, -p["z_thr"]), _cx(z, -p["exit_z"]), _cx(z, p["z_thr"]), _cu(z, p["exit_z"]), {})
+
+    pine = staticmethod(_no_pine)
+
+    def desc(p):
+        return (f"Short saat funding rate jauh di atas biasanya (z-score > {p['z_thr']} dari {p['z_len']} candle, banyak trader long membayar mahal), "
+                f"keluar saat z < {p['exit_z']}; long kebalikannya (funding sangat negatif)")
+
+
+@fam("oi_div", "Open interest vs harga", {"n": (6, 72), "mode": [0, 1], "thr": [1.0, 2.0, 4.0], "trend": T4}, needs=("oi",))
+class _:
+    def py(p, cc):
+        n = p["n"]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            oc = cc.get(("oichg", n), lambda: cc.x["oi"] / ind.shift(cc.x["oi"], n) - 1) * 100
+        hh = cc.get(("hh", n), lambda: ind.shift(ind.rolling_max(cc.h, n)))
+        ll = cc.get(("ll", n), lambda: ind.shift(ind.rolling_min(cc.l, n)))
+        up, dn = cc.c > hh, cc.c < ll
+        with np.errstate(invalid="ignore"):
+            if p["mode"] == 0:      # price breaks out while OI falls = positions closing, move likely to fade
+                le, se = _bool(dn & (oc < -p["thr"])), _bool(up & (oc < -p["thr"]))
+            else:                   # breakout WITH rising OI = new money behind the move
+                le, se = _bool(up & (oc > p["thr"])), _bool(dn & (oc > p["thr"]))
+        return le, se, se, le, {}
+
+    pine = staticmethod(_no_pine)
+
+    def desc(p):
+        if p["mode"] == 0:
+            return (f"Lawan breakout {p['n']} candle saat open interest turun > {p['thr']}% (posisi ditutup, gerakan cenderung lemah)")
+        return f"Ikut breakout {p['n']} candle saat open interest naik > {p['thr']}% (uang baru masuk)"
+
+
+@fam("cvd_flow", "Order flow taker (CVD)", {"n": (6, 96), "thr": [0.02, 0.05, 0.1], "mode": [0, 1], "trend": T4}, needs=("taker",))
+class _:
+    def py(p, cc):
+        n = p["n"]
+        fr = _flow(cc, n)
+        with np.errstate(invalid="ignore"):
+            if p["mode"] == 1:      # follow aggressive flow
+                le, se = _cx(fr, p["thr"]), _cu(fr, -p["thr"])
+            else:                   # divergence: new n-bar low but buyers dominate (and vice versa)
+                hh = cc.get(("hh", n), lambda: ind.shift(ind.rolling_max(cc.h, n)))
+                ll = cc.get(("ll", n), lambda: ind.shift(ind.rolling_min(cc.l, n)))
+                le, se = _bool((cc.c < ll) & (fr > p["thr"])), _bool((cc.c > hh) & (fr < -p["thr"]))
+        return le, se, se, le, {}
+
+    pine = staticmethod(_no_pine)
+
+    def desc(p):
+        if p["mode"] == 1:
+            return f"Ikut order flow: beli saat delta taker {p['n']} candle > {p['thr'] * 100:.0f}% volume, short saat < -{p['thr'] * 100:.0f}%"
+        return (f"Divergence order flow: beli saat harga di low {p['n']} candle tapi pembeli agresif dominan (> {p['thr'] * 100:.0f}% volume); "
+                "short kebalikannya")

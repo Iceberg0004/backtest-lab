@@ -22,12 +22,17 @@ REGIME_SPACE = {"regime": [0, 0, 1, 2], "adx_thr": [20, 25]}
 REGIME_LABEL = {0: "tanpa filter", 1: "hanya saat pasar trending", 2: "hanya saat pasar sideways"}
 # combo builder: confirmation filters added to the entry signal
 FILTER_SPACE = {"sess": [0, 0, 0, 1, 2, 3, 4], "dow": [0, 0, 0, 1, 2, 3], "htf_m": [0, 0, 240, 1440], "htf_len": [20, 50, 100],
-                "vol": [0, 0, 1, 2], "rsi_f": [0, 0, 1], "volf": [0, 0, 1]}
+                "vol": [0, 0, 1, 2], "rsi_f": [0, 0, 1], "volf": [0, 0, 1],
+                # crypto derivatives (only used when the data is loaded; removed otherwise, see drop_unavailable)
+                "fund_f": [0, 0, 0, 1], "flow_f": [0, 0, 0, 1], "oi_f": [0, 0, 0, 1, 2]}
+DERIV_FILTERS = {"fund_f": "fund", "flow_f": "taker", "oi_f": "oi"}
 SESS = {1: (0, 8, "Asia"), 2: (7, 16, "London"), 3: (13, 21, "New York"), 4: (13, 16, "London+NY")}
 DOW = {1: "Senin-Jumat saja", 2: "tanpa Senin", 3: "tanpa Jumat"}
 DEFAULTS = {"regime": 0, "adx_thr": 20, "sl_mode": 0, "sl_atr": 2.0, "tp_atr": 0.0, "trail_atr": 0.0, "sl_pct": 1.0, "tp_pct": 0.0, "trail_mode": 0, "tp1_r": 0.0, "be_r": 0.0,
-            "max_bars": 0, "exit_sig": 0, "sess": 0, "dow": 0, "htf_m": 0, "htf_len": 50, "vol": 0, "rsi_f": 0, "volf": 0, "trend": 0}
-INT_KEYS = {"regime", "adx_thr", "sl_mode", "trail_mode", "max_bars", "exit_sig", "sess", "dow", "htf_m", "htf_len", "vol", "rsi_f", "volf"}
+            "max_bars": 0, "exit_sig": 0, "sess": 0, "dow": 0, "htf_m": 0, "htf_len": 50, "vol": 0, "rsi_f": 0, "volf": 0, "trend": 0,
+            "fund_f": 0, "flow_f": 0, "oi_f": 0}
+INT_KEYS = {"regime", "adx_thr", "sl_mode", "trail_mode", "max_bars", "exit_sig", "sess", "dow", "htf_m", "htf_len", "vol", "rsi_f", "volf",
+            "fund_f", "flow_f", "oi_f"}
 
 
 def full_params(p):
@@ -36,11 +41,13 @@ def full_params(p):
     return q
 
 
-def allowed_families(fams, tf_min, has_volume=True):
+def allowed_families(fams, tf_min, has_volume=True, avail=None):
     out = []
     for f in fams:
         d = FAMILIES.get(f)
         if d is None:
+            continue
+        if d.get("needs") and not d["needs"] <= set(avail or ()):
             continue
         if d["intraday"] and tf_min > 60:
             continue
@@ -48,6 +55,20 @@ def allowed_families(fams, tf_min, has_volume=True):
             continue
         out.append(f)
     return out
+
+
+def drop_unavailable(p, cc):
+    """Switch off derivative filters whose data is not loaded for this market."""
+    av = getattr(cc, "avail", set())
+    for k, need in DERIV_FILTERS.items():
+        if p.get(k) and need not in av:
+            p[k] = 0
+    return p
+
+
+def uses_deriv(fam, p):
+    """True if the strategy needs crypto derivatives data (cannot be exported to Pine)."""
+    return bool(FAMILIES[fam].get("needs")) or any(full_params(p).get(k) for k in DERIV_FILTERS)
 
 
 def fix_params(fam, p, tf_min=60, combo=False):
@@ -142,6 +163,19 @@ class Cache:
         self.carry_short = np.zeros(len(df))
         self.resolve = np.zeros(len(df), np.int8)
         self.pct_unit = self.c * 0.01
+        # crypto derivatives columns (see core/deriv.py), NaN where not available
+        self.x = {}
+        for col in ("taker_buy", "fund", "oi", "lsr", "top_lsr"):
+            if col in df.columns:
+                a = df[col].to_numpy(float)
+                if np.isfinite(a).any():
+                    self.x[col] = a
+        self.avail = set()
+        if "taker_buy" in self.x and self.has_volume:
+            self.avail.add("taker")
+        for col in ("fund", "oi", "lsr"):
+            if col in self.x:
+                self.avail.add(col)
 
     # indicator arrays are cached, but capped in bytes (LRU) so long histories fit in ~1 GB of RAM
     MAX_BYTES = int(float(os.environ.get("VELA_INDICATOR_CACHE_MB", "64")) * 1e6)
@@ -167,6 +201,30 @@ def _trend(cc, n):
     if not n:
         return None
     return cc.get(("ema", "c", n), lambda: ind.ema(cc.c, n))
+
+
+def flow_ratio(cc, n):
+    """Taker delta over n bars as a share of volume: +1 = all aggressive buying, -1 = all selling."""
+    def f():
+        d = 2 * cc.x["taker_buy"] - cc.v
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return ind.sma(d, n) / ind.sma(cc.v, n)
+    return cc.get(("flow", n), f)
+
+
+def fund_z(cc, n):
+    def f():
+        x = cc.x["fund"]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return (x - ind.sma(x, n)) / ind.stdev(x, n)
+    return cc.get(("fundz", n), f)
+
+
+def oi_change(cc, n):
+    def f():
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return cc.x["oi"] / ind.shift(cc.x["oi"], n) - 1
+    return cc.get(("oichg", n), f)
 
 
 def filter_masks(p, cc):
@@ -208,6 +266,17 @@ def filter_masks(p, cc):
             vm = cc.get(("vsma", 20), lambda: ind.sma(cc.v, 20))
             ok = cc.v > vm
             L &= ok; S &= ok
+        av = getattr(cc, "avail", set())
+        if p.get("fund_f", 0) and "fund" in av:        # skip crowded side: no long when funding is extreme high
+            z = fund_z(cc, 300)
+            L &= z < 2; S &= z > -2
+        if p.get("flow_f", 0) and "taker" in av:       # aggressive flow on the same side over the last 24 bars
+            fr = flow_ratio(cc, 24)
+            L &= fr > 0; S &= fr < 0
+        if p.get("oi_f", 0) and "oi" in av:            # 1 = open interest rising (new money), 2 = falling
+            oc = oi_change(cc, 24)
+            ok = (oc > 0) if p["oi_f"] == 1 else (oc < 0)
+            L &= ok; S &= ok
     return L, S, lines
 
 
@@ -246,6 +315,12 @@ def describe(fam, p, direction="both"):
         f.append("RSI(14) di sisi yang sama (>50 long, <50 short)")
     if p.get("volf"):
         f.append("volume di atas rata-rata 20 candle")
+    if p.get("fund_f"):
+        f.append("tidak ikut sisi yang ramai (funding z-score < 2 untuk long, > -2 untuk short)")
+    if p.get("flow_f"):
+        f.append("order flow taker 24 candle searah (lebih banyak beli agresif untuk long)")
+    if p.get("oi_f"):
+        f.append("open interest naik 24 candle" if p["oi_f"] == 1 else "open interest turun 24 candle")
     flt = (" Konfirmasi: " + ", ".join(f) + ".") if f else ""
     if p["sl_mode"] == 1:
         ex = f" Stop loss {p['sl_pct']}%"
@@ -568,7 +643,7 @@ def search(df, cfg, progress=None, cc=None):
     combo = bool(cfg.get("combo", False))
     mode = cfg.get("mode", "ketat")
     algo = cfg.get("algo", "random")
-    fams = allowed_families(cfg["families"], tf_min, cc.has_volume)
+    fams = allowed_families(cfg["families"], tf_min, cc.has_volume, getattr(cc, "avail", set()))
     skipped_fams = [f for f in cfg["families"] if f not in fams]
     if not fams:
         raise ValueError("Tidak ada keluarga strategi yang cocok untuk timeframe / data ini.")
@@ -587,10 +662,10 @@ def search(df, cfg, progress=None, cc=None):
             break
         if algo == "evo" and tested >= warmup and elite and rng.random() < 0.7:
             _, fam, par = elite[int(rng.integers(0, len(elite)))]
-            p = mutate(fam, par, rng, tf_min, combo)
+            p = drop_unavailable(mutate(fam, par, rng, tf_min, combo), cc)
         else:
             fam = fams[k % len(fams)]
-            p = sample_params(fam, rng, tf_min, combo)
+            p = drop_unavailable(sample_params(fam, rng, tf_min, combo), cc)
         key = (fam, tuple(sorted(p.items())))
         if key in seen:
             misses += 1

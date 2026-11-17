@@ -479,7 +479,7 @@ def render_compare(load_any, cost_for_src, make_cache_fn=None):
         for k, (name, d) in enumerate(lst.items()):
             bar.progress(k / len(lst), text=f"Menguji {name}...")
             try:
-                df = load_any(d["source"], d["symbol"], d["tf"], d.get("start") or None)
+                df = load_any(d["source"], d["symbol"], d["tf"], d.get("start") or None, E.uses_deriv(d["family"], d["params"]))
                 sett = d.get("settings", {})
                 cc = make_cache_fn(df, {"carry": sett.get("carry")}, d["symbol"], d["tf"])[0] if make_cache_fn else E.Cache(df)
                 n = len(df)
