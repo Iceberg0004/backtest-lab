@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from . import engine as E
 
-TAIL = 5000          # bars used (enough warm-up for every indicator, small memory)
+TAIL = 3000          # bars used (enough warm-up for every indicator, small memory)
 
 
 def _last_sig(le, lx, se, sx, i):

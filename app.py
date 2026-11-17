@@ -21,6 +21,7 @@ from core.pine import to_pine
 from core.prompt import parse
 from core import robust as R, realism as X
 import ui_extra as U
+import ui_v4 as V
 import threading
 
 def _bg_probe():
@@ -167,6 +168,19 @@ def make_cache(dfc, cfg, sym, tf_):
     return cc, info
 
 
+def shared_cache(dfc, cfg, sym, tf_):
+    """One indicator cache per session for the same data + holding-cost settings (detail page, ML, walk-forward,
+    portfolio all reuse it instead of building their own copy on every rerun; saves memory on the 1 GB cloud)."""
+    key = (sym, tf_, len(dfc), str(dfc.index[-1]) if len(dfc) else "", repr((cfg or {}).get("carry")))
+    got = ss.get("_shared_cc")
+    if got and got[0] == key:
+        return got[1], got[2]
+    ss["_shared_cc"] = None
+    cc, info = make_cache(dfc, cfg, sym, tf_)
+    ss["_shared_cc"] = (key, cc, info)
+    return cc, info
+
+
 def carry_cfg():
     if ss.source == "binance" and ss.use_funding:
         return dict(kind="funding")
@@ -253,9 +267,9 @@ def selected_strategy():
 # ------------------------------------------------------------------ tabs
 st.title("📈 Backtest Lab")
 st.caption(f"{symbol} · {tf} · sumber: {src.label} · waktu ditampilkan dalam WIB (UTC+7)")
-t_live, t_search, t_scan, t_res, t_wfo, t_port, t_cmp, t_help = st.tabs(
-    ["📈 Chart Live", "🔬 Cari Strategi", "🛰️ Scan banyak pasar", "📊 Hasil & Detail", "🔁 Walk-forward", "🧺 Portofolio",
-     "💾 Simpan & Bandingkan", "📘 Panduan"])
+t_live, t_search, t_scan, t_res, t_ml, t_wfo, t_port, t_cmp, t_sig, t_help = st.tabs(
+    ["📈 Chart Live", "🔬 Cari Strategi", "🛰️ Scan banyak pasar", "📊 Hasil & Detail", "🤖 ML", "🔁 Walk-forward", "🧺 Portofolio",
+     "💾 Simpan & Bandingkan", "📡 Sinyal Live", "📘 Panduan"])
 
 with t_live:
     nbars = st.select_slider("Jumlah candle di chart", [200, 500, 1000, 2000], value=500)
@@ -535,7 +549,7 @@ with t_res:
             if dfc is None:
                 st.warning(f"Pilih lagi {res['symbol']} {res['tf']} di sidebar untuk melihat detail strategi ini.")
                 st.stop()
-            cc, carry_info = make_cache(dfc, cfg, res["symbol"], res["tf"])
+            cc, carry_info = shared_cache(dfc, cfg, res["symbol"], res["tf"])
             n = len(dfc)
             split = int(np.searchsorted(dfc.index.values, np.datetime64(meta["split_time"].tz_convert(None))))
             is_start = min(260, split // 4)
@@ -562,8 +576,17 @@ with t_res:
                        make_cache=lambda d_, s_: make_cache(d_, cfg if res["source"] == "binance" else None, s_, res["tf"])[0],
                        cost_for=lambda s_, px: cost_for(res["source"], s_, px))
             U.render_report(ctx)
-            d_chart, d_perf, d_trades, d_sim, d_rob, d_bask, d_real, d_exp = st.tabs(
-                ["Chart", "Performance", "Trades", "Simulation (Monte Carlo)", "🧪 Uji ketahanan", "🌍 Multi-aset", "🎯 Realisme", "Export & Simpan"])
+            d_chart, d_perf, d_ana, d_trades, d_sim, d_size, d_reg, d_meta, d_rob, d_bask, d_real, d_exp = st.tabs(
+                ["Chart", "Performance", "📐 Analitik", "Trades", "Simulation (Monte Carlo)", "💰 Ukuran posisi & Prop firm", "🌦️ Regime",
+                 "🤖 Meta-label", "🧪 Uji ketahanan", "🌍 Multi-aset", "🎯 Realisme", "Export & Simpan"])
+            with d_ana:
+                V.render_analytics(ctx, ftr)
+            with d_size:
+                V.render_sizing(ctx)
+            with d_reg:
+                V.render_regime(ctx)
+            with d_meta:
+                V.render_meta(ctx)
             with d_rob:
                 U.render_robust(ctx)
             with d_bask:
@@ -662,6 +685,13 @@ with t_res:
                     ss.setdefault("compare", {})[f"{tv_sym} {res['tf']} {E.FAMILIES[o['fam']]['name']} #{ss.sel+1}"] = json.loads(sj)
                     st.success("Ditambahkan. Buka tab 'Simpan & Bandingkan'.")
                 st.caption("Pine sekarang juga punya tabel statistik di pojok chart dan alert untuk sinyal, stop loss, take profit dan posisi baru.")
+                st.markdown("**📄 Laporan lengkap (HTML)**: chart, metrik, rapor dan kode Pine dalam satu file. Buka di browser HP/laptop.")
+                rkey = f"rep_{ctx['skey']}_{n}"
+                if st.button("Buat laporan HTML", key="mk_rep"):
+                    ss["report"] = (rkey, V.report_html(ctx, ftr, im, om, fm, g, strat, f"{E.FAMILIES[o['fam']]['name']} #{ss.sel+1}"))
+                if ss.get("report") and ss["report"][0] == rkey:
+                    st.download_button("⬇️ Download laporan (.html)", ss["report"][1], f"laporan_{tv_sym}_{res['tf']}_{ss.sel+1}.html",
+                                       mime="text/html", width='stretch')
                 with st.expander("Lihat kode Pine strategy"):
                     st.code(strat, language="javascript")
                 with st.expander("Lihat kode Pine indicator"):
@@ -679,9 +709,14 @@ def _res_data():
     if df is None:
         return None
     dfc = closed_only(df, res["tf"])
-    cc, _ = make_cache(dfc, res["cfg"], res["symbol"], res["tf"])
+    cc, _ = shared_cache(dfc, res["cfg"], res["symbol"], res["tf"])
     return res, dfc, cc
 
+
+with t_ml:
+    got = _res_data()
+    if got:
+        V.render_ml(*got)
 
 with t_wfo:
     got = _res_data()
@@ -698,6 +733,14 @@ with t_cmp:
         st_ = pd.Timestamp(start).date() if start else start_date
         return closed_only(load(source, sym, tf_, st_), tf_)
     U.render_compare(_load_any, cost_for, make_cache)
+
+with t_sig:
+    def _lv_raw(source, sym, tf_):
+        need = int(TF_MINUTES[tf_] * 5200 / 1440 * (1.0 if source == "binance" else 1.5)) + 3
+        cap = MAX_DAYS.get(source, {}).get(tf_)
+        need = min(need, cap) if cap else need
+        return load(source, sym, tf_, dt.date.today() - dt.timedelta(days=need))
+    V.render_live(lambda source, sym, tf_, raw: closed_only(raw, tf_), _lv_raw, cost_for, lambda s_: SOURCES[s_].symbols())
 
 with t_help:
     st.markdown(open("README_ID.md", encoding="utf-8").read() if __import__("os").path.exists("README_ID.md") else "")

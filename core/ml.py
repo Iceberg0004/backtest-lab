@@ -136,7 +136,7 @@ TOP_SHARES = (0.30, 0.20, 0.10, 0.05)   # trade only the top x% most confident i
 
 
 def ml_search(cc, is_start, split, cfg, pt=2.0, sl=1.0, H=24, kind="hgb", folds=5, top_shares=TOP_SHARES,
-              direction="both", progress=None, max_train=60000):
+              direction="both", progress=None, max_train=40000):
     """Returns dict with OOF (in-sample) and OOS results, chosen threshold, trial Sharpes, importance."""
     t0 = time.time()
     n = len(cc.c)

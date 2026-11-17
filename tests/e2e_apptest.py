@@ -85,6 +85,45 @@ p = res["search_tests"].get("port")
 print("portfolio", p and (p["keep"], {k: round(v, 3) for k, v in p["stats_all"].items()}, {k: round(v, 3) for k, v in p["stats_oos"].items()}))
 cr = at.session_state["compare_res"] if "compare_res" in at.session_state else {}
 print("compare", {k: (round(v["full"]["net"] * 100, 2) if "full" in v else v.get("error")) for k, v in cr.items()})
+# ---- v4 features (all opt-in buttons)
+import numpy as np
+t1 = time.time()
+at.toggle(key="ana_on").set_value(True).run()
+assert not at.exception, [e.message for e in at.exception]
+print("analytics shown", round(time.time() - t1, 1), "s", len(at.get("plotly_chart")), "charts")
+at.toggle(key="ana_on").set_value(False).run()
+at.toggle(key="sz_on").set_value(True).run()
+at.selectbox(key="sz_mode").set_value("risk").run()
+assert not at.exception, [e.message for e in at.exception]
+click("▶️ Simulasikan challenge"); print("clicked challenge")
+for mode in ("fixed", "vol", "kelly"):
+    at.selectbox(key="sz_mode").set_value(mode).run()
+    assert not at.exception, [e.message for e in at.exception]
+print("sizing modes ok")
+at.selectbox(key="sz_mode").set_value("risk").run()
+at.toggle(key="sz_on").set_value(False).run()
+for lab in ["🤖 Latih meta-label", "🌦️ Deteksi regime", "✨ Pilih otomatis", "Buat laporan HTML",
+            "🤖 Latih & uji model", "📡 Cek sinyal sekarang"]:
+    t1 = time.time()
+    try:
+        click(lab)
+        print("clicked", lab, round(time.time() - t1, 1), "s")
+    except AssertionError as e:
+        print("SKIP", lab, str(e)[:300])
+ss_ = at.session_state
+if "meta" in ss_:
+    for r in ss_["meta"].values():
+        if "error" in r: print("meta", r["error"])
+        else: print("meta", r["kind"], "thr", r["threshold"], "auc", r["auc_cv"] and round(r["auc_cv"], 3), "rule_oos", round(r["rule_oos"]["net"] * 100, 1), round(r["rule_oos"]["pf"], 2), r["rule_oos"]["trades"], "meta_oos", round(r["meta_oos"]["net"] * 100, 1), round(r["meta_oos"]["pf"], 2), r["meta_oos"]["trades"])
+if "regime" in ss_:
+    for k, (lab_, names, rows) in ss_["regime"].items(): print("regime", names, [round(r["Porsi unseen %"], 1) for r in rows])
+if "pf_res" in ss_:
+    r = ss_["pf_res"]; print("prop", r["mc"] and {k: (round(v, 3) if isinstance(v, float) else v) for k, v in r["mc"].items()}, "hist", len(r["hist"]))
+if "report" in ss_: print("report html bytes", len(ss_["report"][1]))
+if "ml" in ss_:
+    for r in ss_["ml"].values(): print("ml", r["kind"], "is", round(r["is_m"]["net"] * 100, 1), round(r["is_m"]["pf"], 2), "oos", round(r["oos_m"]["net"] * 100, 1), round(r["oos_m"]["pf"], 2), r["oos_m"]["trades"], "auc", {k: round(v, 3) for k, v in r["auc"].items()}, "cost2x", round(r["cost2x"]["net"] * 100, 1), round(r["seconds"], 1), "s")
+if "lv_rows" in ss_:
+    for r in ss_["lv_rows"]: print("live", {k: (round(v, 4) if isinstance(v, float) else v) for k, v in r.items()})
 # final grade after all tests: re-render
 at.run()
 t = at.session_state["tests"][key]
