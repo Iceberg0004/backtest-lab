@@ -1,9 +1,11 @@
 """End-to-end UI test with Streamlit's AppTest (no browser needed).
-Usage: python tests/e2e_apptest.py binance BTCUSDT [carry] [vela] [evo] [combo] [scan]
+Usage: python tests/e2e_apptest.py binance BTCUSDT [carry] [vela] [evo] [combo] [scan] [deriv] [strict]
        python tests/e2e_apptest.py dukascopy EURUSD"""
 import os, sys, time
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from streamlit.testing.v1 import AppTest
+sys.path.insert(0, os.getcwd())
+from core import engine as E
 
 source, symbol = sys.argv[1], sys.argv[2]
 flags = set(sys.argv[3:])
@@ -27,6 +29,10 @@ if "evo" in flags:
     at.radio(key="algo").set_value("evo").run()
 if "combo" in flags:
     at.checkbox(key="combo").check().run()
+if "deriv" in flags:
+    at.checkbox(key="use_deriv").check().run()
+if "strict" in flags:
+    at.checkbox(key="strict_dsr").check().run()
 assert not at.exception, at.exception
 print("setup ok", sorted(flags), round(time.time() - t0, 1), "s")
 
@@ -48,6 +54,10 @@ for m in at.success:
 for m in at.info:
     print("INFO:", m.value[:200])
 res = at.session_state["res"]
+if res.get("deriv_info"):
+    print("deriv", {k: (v.get("ok"), v.get("coverage")) for k, v in res["deriv_info"].items() if isinstance(v, dict)})
+    print("deriv strategies listed", sum(E.uses_deriv(o["fam"], o["params"]) for o in res["out"]), "of", len(res["out"]),
+          "passed with deriv", sum(o["passed"] and E.uses_deriv(o["fam"], o["params"]) for o in res["out"]))
 print("tested", res["meta"]["tested"], "passed", sum(o["passed"] for o in res["out"]), "pbo", res["search_tests"]["pbo"] and round(res["search_tests"]["pbo"]["pbo"], 3))
 # make sure a detail is shown: prefer a passing strategy
 idx = next((i for i, o in enumerate(res["out"]) if o["passed"]), 0)
@@ -61,7 +71,7 @@ for cb in at.checkbox:
         cb.check()
 at.run()
 for lab in ["▶️ Jalankan tes harga acak", "▶️ Jalankan tes geser parameter", "▶️ Jalankan tes pencarian acak",
-            "▶️ Cek dengan candle 1 menit", "▶️ Jalankan walk-forward", "▶️ Jalankan tes multi-aset", "▶️ Buat portofolio",
+            "▶️ Cek dengan candle 1 menit", "▶️ Jalankan walk-forward", "▶️ Jalankan tes multi-aset", "▶️ Buat portofolio", "🔗 Hitung kemiripan",
             "➕ Tambah ke perbandingan", "▶️ Uji ulang semua di data terbaru"]:
     t1 = time.time()
     try:
@@ -83,6 +93,8 @@ w = res["search_tests"].get("wfo")
 if w: print("wfo total", round(w["total"] * 100, 2), "dd", round(w["maxdd"] * 100, 2), "wfe", w["wfe"], "pos", w["pos_windows"], [r["chosen"] for r in w["rows"]])
 p = res["search_tests"].get("port")
 print("portfolio", p and (p["keep"], {k: round(v, 3) for k, v in p["stats_all"].items()}, {k: round(v, 3) for k, v in p["stats_oos"].items()}))
+sim = res["search_tests"].get("sim")
+print("similarity", sim and (sim[2]["n"], [len(g) for g in sim[2]["groups"]][:10]))
 cr = at.session_state["compare_res"] if "compare_res" in at.session_state else {}
 print("compare", {k: (round(v["full"]["net"] * 100, 2) if "full" in v else v.get("error")) for k, v in cr.items()})
 # ---- v4 features (all opt-in buttons)
@@ -136,7 +148,8 @@ if "scan" in flags:
     t1 = time.time()
     click("🛰️ Mulai scan")
     rows = at.session_state["scan_rows"]
-    print("scan", round(time.time() - t1, 1), "s")
+    print("scan", round(time.time() - t1, 1), "s", "matrix charts", len(at.get("plotly_chart")),
+          "fam_grades", sum(len(r.get("fam_grades") or {}) for r in rows))
     for r in rows:
         print("  ", {k: (round(v, 2) if isinstance(v, float) else v) for k, v in r.items() if k not in ("key", "best_idx")})
     keys = [r["key"] for r in rows if r.get("key")]
