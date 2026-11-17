@@ -24,9 +24,22 @@ FAMILIES = {
                              "sq_factor": [0.6, 0.7, 0.8, 0.9]}},
     "macd": {"name": "Momentum (MACD cross)",
              "space": {"fast": (5, 20), "slow": (21, 60), "signal": (5, 15), "trend": [0, 0, 100, 200]}},
+    "supertrend": {"name": "Trend following (Supertrend)",
+                   "space": {"st_len": (7, 30), "st_mult": [1.5, 2.0, 2.5, 3.0, 3.5, 4.0], "trend": [0, 0, 100, 200]}},
+    "keltner": {"name": "Breakout (Keltner channel)",
+                "space": {"kc_len": (10, 80), "kc_mult": [1.0, 1.5, 2.0, 2.5, 3.0], "trend": [0, 0, 100, 200]}},
+    "stochrsi": {"name": "Pullback searah tren (Stochastic RSI)",
+                 "space": {"rsi_len": (7, 21), "stoch_len": (7, 21), "k_lo": [10, 15, 20, 25], "k_hi": [75, 80, 85, 90],
+                           "trend": [50, 100, 200]}},
+    "zscore": {"name": "Mean reversion (Z-score)",
+               "space": {"z_len": (20, 120), "z_entry": [1.5, 2.0, 2.5, 3.0], "z_exit": [0.0, 0.0, 0.5], "trend": [0, 0, 100, 200]}},
 }
+# searchable market-regime filter (applies to every family): 0 = off, 1 = only trade when trending (ADX >= thr),
+# 2 = only trade when ranging (ADX < thr)
+REGIME_SPACE = {"regime": [0, 0, 1, 2], "adx_thr": [20, 25]}
+REGIME_LABEL = {0: "tanpa filter", 1: "hanya saat pasar trending", 2: "hanya saat pasar sideways"}
 INT_KEYS = {"fast", "slow", "trend", "rsi_len", "lower", "upper", "exit_level", "entry_len", "exit_len",
-            "bb_len", "sq_len", "signal"}
+            "bb_len", "sq_len", "signal", "st_len", "kc_len", "stoch_len", "k_lo", "k_hi", "z_len", "regime", "adx_thr"}
 
 
 def sample_params(fam, rng):
@@ -35,6 +48,8 @@ def sample_params(fam, rng):
         p[k] = rng.choice(v) if isinstance(v, list) else int(rng.integers(v[0], v[1] + 1))
         if isinstance(p[k], np.generic):
             p[k] = p[k].item()
+    for k, v in REGIME_SPACE.items():
+        p[k] = int(rng.choice(v))
     for k, v in EXIT_SPACE.items():
         p[k] = float(rng.choice(v))
     if fam in ("ma_cross", "macd") and p["fast"] >= p["slow"] * 0.8:
@@ -50,6 +65,18 @@ class Cache:
         self.o, self.h, self.l, self.c = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
         self.atr = ind.atr(self.h, self.l, self.c, 14)
         self.d = {}
+        self.index = df.index
+        # last bar of every UTC day -> daily returns for Sharpe / DSR / PBO / portfolio
+        day = np.asarray(df.index.normalize().asi8)
+        self.day_end = np.flatnonzero(np.r_[day[1:] != day[:-1], True])
+        span_years = max((df.index[-1] - df.index[0]).total_seconds() / (365.25 * 86400), 1e-9)
+        self.days_per_year = len(self.day_end) / span_years
+        self.bars_per_year = len(df) / span_years
+        # optional holding costs per bar (fraction of position): funding / swap. 0 = off.
+        self.carry_long = np.zeros(len(df))
+        self.carry_short = np.zeros(len(df))
+        # intrabar resolution: 1 = take-profit was hit first in this bar (from lower-timeframe data)
+        self.resolve = np.zeros(len(df), np.int8)
 
     def get(self, key, fn):
         if key not in self.d:
@@ -122,8 +149,46 @@ def signals(fam, p, cc: Cache):
         le, lx, se, sx = up & tl, dn, dn & ts, up
         lines["_macd"] = mline
         lines["_macd_signal"] = sig
+    elif fam == "supertrend":
+        a = cc.get(("atr", p["st_len"]), lambda: ind.atr(cc.h, cc.l, c, p["st_len"]))
+        up_b, dn_b, d = cc.get(("st", p["st_len"], p["st_mult"]), lambda: ind.supertrend(cc.h, cc.l, c, a, p["st_mult"]))
+        d1 = ind.shift(d)
+        flip_up, flip_dn = (d == 1) & (d1 == -1), (d == -1) & (d1 == 1)
+        le, lx, se, sx = flip_up & tl, flip_dn, flip_dn & ts, flip_up
+        lines["Supertrend"] = np.where(d == 1, up_b, np.where(d == -1, dn_b, np.nan))
+    elif fam == "keltner":
+        basis = cc.get(("ema", "c", p["kc_len"]), lambda: ind.ema(c, p["kc_len"]))
+        up_b, lo_b = basis + p["kc_mult"] * cc.atr, basis - p["kc_mult"] * cc.atr
+        le = ind.crossover(c, up_b) & tl
+        lx = ind.crossunder(c, basis)
+        se = ind.crossunder(c, lo_b) & ts
+        sx = ind.crossover(c, basis)
+        lines[f"KC upper {p['kc_len']}/{p['kc_mult']}"] = up_b
+        lines[f"KC basis {p['kc_len']}"] = basis
+        lines[f"KC lower {p['kc_len']}/{p['kc_mult']}"] = lo_b
+    elif fam == "stochrsi":
+        k = cc.get(("srsi", p["rsi_len"], p["stoch_len"]), lambda: ind.stoch_rsi_k(c, p["rsi_len"], p["stoch_len"]))
+        le = ind.crossover(k, p["k_lo"]) & tl
+        lx = ind.crossunder(k, p["k_hi"])
+        se = ind.crossunder(k, p["k_hi"]) & ts
+        sx = ind.crossover(k, p["k_lo"])
+        lines["_stoch"] = k
+    elif fam == "zscore":
+        z = cc.get(("z", p["z_len"]), lambda: ind.zscore(c, p["z_len"]))
+        le = ind.crossover(z, -p["z_entry"]) & tl
+        lx = ind.crossover(z, p["z_exit"])
+        se = ind.crossunder(z, p["z_entry"]) & ts
+        sx = ind.crossunder(z, -p["z_exit"])
+        lines["_z"] = z
     else:
         raise ValueError(fam)
+    rg = p.get("regime", 0)
+    if rg:
+        a = cc.get(("adx",), lambda: ind.adx(cc.h, cc.l, c, cc.atr))
+        with np.errstate(invalid="ignore"):
+            ok = (a >= p["adx_thr"]) if rg == 1 else (a < p["adx_thr"])
+        le, se = le & ok, se & ok
+        lines["_adx"] = a
     f = lambda a: np.nan_to_num(a, nan=0).astype(np.bool_)
     return f(le), f(lx), f(se), f(sx), lines
 
@@ -143,9 +208,22 @@ def describe(fam, p, direction="both"):
     elif fam == "bb_squeeze":
         core = (f"Tunggu Bollinger({p['bb_len']}, {p['bb_mult']}) menyempit (lebar < {p['sq_factor']} x rata-rata {p['sq_len']} candle), "
                 f"lalu beli saat harga tembus band atas / short saat tembus band bawah; keluar di garis tengah")
-    else:
+    elif fam == "macd":
         core = (f"Beli saat MACD({p['fast']},{p['slow']},{p['signal']}) memotong ke atas signal{tr}; "
                 f"short saat memotong ke bawah")
+    elif fam == "supertrend":
+        core = f"Beli saat Supertrend({p['st_len']}, {p['st_mult']}) berbalik naik{tr}; short saat berbalik turun"
+    elif fam == "keltner":
+        core = (f"Beli saat harga tembus band atas Keltner (EMA {p['kc_len']} + {p['kc_mult']} x ATR){tr}, keluar saat "
+                f"kembali di bawah EMA; short kebalikannya")
+    elif fam == "stochrsi":
+        core = (f"Searah tren EMA {p['trend']}: beli saat Stoch RSI({p['rsi_len']},{p['stoch_len']}) naik di atas {p['k_lo']} "
+                f"(selesai koreksi), keluar saat turun di bawah {p['k_hi']}; short kebalikannya")
+    else:
+        core = (f"Beli saat Z-score({p['z_len']}) naik kembali di atas -{p['z_entry']}{tr}, keluar saat Z > {p['z_exit']}; "
+                f"short saat turun kembali di bawah {p['z_entry']}, keluar saat Z < -{p['z_exit']}")
+    if p.get("regime"):
+        core += f"; {REGIME_LABEL[p['regime']]} (ADX {'≥' if p['regime'] == 1 else '<'} {p['adx_thr']})"
     ex = f". Stop loss {p['sl_atr']} x ATR"
     ex += f", take profit {p['tp_atr']} x ATR" if p["tp_atr"] > 0 else ", tanpa take profit tetap"
     ex += f", trailing stop {p['trail_atr']} x ATR" if p["trail_atr"] > 0 else ""
@@ -155,16 +233,20 @@ def describe(fam, p, direction="both"):
 # ------------------------------------------------------------------ simulator
 @njit(cache=True)
 def simulate(o, h, l, c, atr, le, lx, se, sx, start, end, allow_long, allow_short,
-             sl_k, tp_k, tr_k, cost_frac, cost_abs, want_equity, lev):
+             sl_k, tp_k, tr_k, cost_frac, cost_abs, want_equity, lev, carry_l, carry_s, resolve):
     """Signals are evaluated at the close of bar j and filled at the OPEN of bar j+1
     (same as Pine strategy() default). Stops/targets use high/low of each bar; if both
-    are touched in one bar, the stop is assumed first (conservative)."""
+    are touched in one bar, the stop is assumed first (conservative) unless resolve[i] == 1
+    (lower-timeframe data showed the target was reached first).
+    carry_l / carry_s: holding cost per bar as a fraction of the position (funding / swap),
+    charged at each bar close while the position is open (negative = you receive it)."""
     n = end - start
     eq_arr = np.empty(n if want_equity else 1)
     tr_ent = np.empty(n, np.int64); tr_ex = np.empty(n, np.int64); tr_dir = np.empty(n, np.int64)
     tr_ep = np.empty(n); tr_xp = np.empty(n); tr_ret = np.empty(n); tr_reason = np.empty(n, np.int64)
+    tr_amb = np.zeros(n, np.int64); tr_sl = np.empty(n); tr_tp = np.empty(n); tr_carry = np.zeros(n)
     nt = 0
-    pos = 0; ep = 0.0; ei = 0; stop = np.nan; tp = np.nan
+    pos = 0; ep = 0.0; ei = 0; stop = np.nan; tp = np.nan; acc = 0.0
     eq = 1.0; peak = 1.0; maxdd = 0.0
     if want_equity:
         eq_arr[0] = 1.0
@@ -194,45 +276,57 @@ def simulate(o, h, l, c, atr, le, lx, se, sx, start, end, allow_long, allow_shor
                 r = (px * (1 - cost_frac) - cost_abs - (ep * (1 + cost_frac) + cost_abs)) / ep
             else:
                 r = ((ep * (1 - cost_frac) - cost_abs) - (px * (1 + cost_frac) + cost_abs)) / ep
-            r *= lev
+            r = (r - acc) * lev
             eq *= (1 + r)
             tr_ent[nt] = ei; tr_ex[nt] = i; tr_dir[nt] = pos; tr_ep[nt] = ep; tr_xp[nt] = px; tr_ret[nt] = r; tr_reason[nt] = 0
+            tr_sl[nt] = stop; tr_tp[nt] = tp; tr_carry[nt] = acc
             nt += 1
             pos = 0
         if new_dir != 0 and not np.isnan(atr[j]):
-            pos = new_dir; ep = o[i]; ei = i
+            pos = new_dir; ep = o[i]; ei = i; acc = 0.0
             stop = c[j] - pos * sl_k * atr[j]
             tp = c[j] + pos * tp_k * atr[j] if tp_k > 0 else np.nan
         # ---- 2) intrabar stop / target
         if pos != 0:
-            hit = False; px = 0.0; reason = 0
+            hit = False; px = 0.0; reason = 0; amb = 0
             if pos == 1:
-                if l[i] <= stop:
+                hs = l[i] <= stop
+                ht = tp_k > 0 and h[i] >= tp
+                if hs and ht and o[i] > stop:
+                    amb = 1
+                if hs and not (amb == 1 and resolve[i] == 1):
                     hit = True; px = min(o[i], stop); reason = 1
-                elif tp_k > 0 and h[i] >= tp:
+                elif ht:
                     hit = True; px = max(o[i], tp); reason = 2
             else:
-                if h[i] >= stop:
+                hs = h[i] >= stop
+                ht = tp_k > 0 and l[i] <= tp
+                if hs and ht and o[i] < stop:
+                    amb = 1
+                if hs and not (amb == 1 and resolve[i] == 1):
                     hit = True; px = max(o[i], stop); reason = 1
-                elif tp_k > 0 and l[i] <= tp:
+                elif ht:
                     hit = True; px = min(o[i], tp); reason = 2
             if hit:
                 if pos == 1:
                     r = (px * (1 - cost_frac) - cost_abs - (ep * (1 + cost_frac) + cost_abs)) / ep
                 else:
                     r = ((ep * (1 - cost_frac) - cost_abs) - (px * (1 + cost_frac) + cost_abs)) / ep
-                r *= lev
+                r = (r - acc) * lev
                 eq *= (1 + r)
                 tr_ent[nt] = ei; tr_ex[nt] = i; tr_dir[nt] = pos; tr_ep[nt] = ep; tr_xp[nt] = px; tr_ret[nt] = r; tr_reason[nt] = reason
+                tr_amb[nt] = amb; tr_sl[nt] = stop; tr_tp[nt] = tp; tr_carry[nt] = acc
                 nt += 1
                 pos = 0
-        # ---- 3) bar close: mark-to-market equity, drawdown, trailing update
+        # ---- 3) bar close: carry, mark-to-market equity, drawdown, trailing update
         if pos == 1:
-            m = eq * (1 + lev * (c[i] * (1 - cost_frac) - cost_abs - (ep * (1 + cost_frac) + cost_abs)) / ep)
+            acc += carry_l[i]
+            m = eq * (1 + lev * ((c[i] * (1 - cost_frac) - cost_abs - (ep * (1 + cost_frac) + cost_abs)) / ep - acc))
             if tr_k > 0 and not np.isnan(atr[i]):
                 stop = max(stop, h[i] - tr_k * atr[i])
         elif pos == -1:
-            m = eq * (1 + lev * ((ep * (1 - cost_frac) - cost_abs) - (c[i] * (1 + cost_frac) + cost_abs)) / ep)
+            acc += carry_s[i]
+            m = eq * (1 + lev * (((ep * (1 - cost_frac) - cost_abs) - (c[i] * (1 + cost_frac) + cost_abs)) / ep - acc))
             if tr_k > 0 and not np.isnan(atr[i]):
                 stop = min(stop, l[i] + tr_k * atr[i])
         else:
@@ -250,11 +344,13 @@ def simulate(o, h, l, c, atr, le, lx, se, sx, start, end, allow_long, allow_shor
             r = (px * (1 - cost_frac) - cost_abs - (ep * (1 + cost_frac) + cost_abs)) / ep
         else:
             r = ((ep * (1 - cost_frac) - cost_abs) - (px * (1 + cost_frac) + cost_abs)) / ep
-        r *= lev
+        r = (r - acc) * lev
         eq *= (1 + r)
         tr_ent[nt] = ei; tr_ex[nt] = i; tr_dir[nt] = pos; tr_ep[nt] = ep; tr_xp[nt] = px; tr_ret[nt] = r; tr_reason[nt] = 3
+        tr_sl[nt] = stop; tr_tp[nt] = tp; tr_carry[nt] = acc
         nt += 1
-    return (eq, maxdd, nt, tr_ent[:nt], tr_ex[:nt], tr_dir[:nt], tr_ep[:nt], tr_xp[:nt], tr_ret[:nt], tr_reason[:nt], eq_arr)
+    return (eq, maxdd, nt, tr_ent[:nt], tr_ex[:nt], tr_dir[:nt], tr_ep[:nt], tr_xp[:nt], tr_ret[:nt], tr_reason[:nt], eq_arr,
+            tr_amb[:nt], tr_sl[:nt], tr_tp[:nt], tr_carry[:nt])
 
 
 def metrics(rets, eq, maxdd):
@@ -268,15 +364,38 @@ def metrics(rets, eq, maxdd):
                 maxdd=float(maxdd), avg=float(rets.mean()), ret_dd=float(net / max(maxdd, 1e-3)))
 
 
-def run(fam, p, cc, start, end, direction, cost_frac, cost_abs, want_equity=False, sig=None, lev=1.0):
+def daily_returns(cc, start, end, equity):
+    """Daily returns from a bar equity curve that starts at bar `start` (value 1.0)."""
+    de = cc.day_end[(cc.day_end > start) & (cc.day_end < end)]
+    if len(de) == 0:
+        return np.zeros(0)
+    v = equity[de - start]
+    return np.diff(np.r_[1.0, v]) / np.r_[1.0, v[:-1]]
+
+
+def sharpe(dr):
+    """Non-annualised Sharpe of a return series (0 when flat)."""
+    if len(dr) < 2:
+        return 0.0
+    sd = dr.std(ddof=1)
+    return float(dr.mean() / sd) if sd > 1e-12 else 0.0
+
+
+def run(fam, p, cc, start, end, direction, cost_frac, cost_abs, want_equity=False, sig=None, lev=1.0, daily=False):
     le, lx, se, sx, _ = sig if sig is not None else signals(fam, p, cc)
     res = simulate(cc.o, cc.h, cc.l, cc.c, cc.atr, le, lx, se, sx, int(start), int(end),
                    direction in ("long", "both"), direction in ("short", "both"),
                    float(p["sl_atr"]), float(p["tp_atr"]), float(p["trail_atr"]), float(cost_frac), float(cost_abs),
-                   want_equity, float(lev))
-    eq, maxdd, nt, ent, ex, dr, ep, xp, ret, reason, eqa = res
+                   want_equity or daily, float(lev), cc.carry_long, cc.carry_short, cc.resolve)
+    eq, maxdd, nt, ent, ex, dr, ep, xp, ret, reason, eqa, amb, sl, tp, carry = res
     m = metrics(ret, eq, maxdd)
-    return m, dict(ent=ent, ex=ex, dir=dr, ep=ep, xp=xp, ret=ret, reason=reason, equity=eqa)
+    tr = dict(ent=ent, ex=ex, dir=dr, ep=ep, xp=xp, ret=ret, reason=reason, equity=eqa, amb=amb, sl=sl, tp=tp, carry=carry)
+    if daily:
+        d = daily_returns(cc, start, end, eqa)
+        tr["daily"] = d
+        m["sharpe_d"] = sharpe(d)
+        m["sharpe"] = m["sharpe_d"] * math.sqrt(cc.days_per_year)
+    return m, tr
 
 
 # ------------------------------------------------------------------ robustness
@@ -323,7 +442,9 @@ def stability(fam, p, cc, start, end, direction, cf, ca, lev=1.0):
     return (float((pfs > 1.0).mean()) if len(pfs) else 0.0), (float(np.median(pfs)) if len(pfs) else 0.0)
 
 
-def monte_carlo(rets, runs=1000, method="bootstrap", seed=7):
+def monte_carlo(rets, runs=1000, method="bootstrap", seed=7, skip=0.1):
+    """bootstrap = resample trades with replacement; shuffle = random order;
+    skip = randomly miss `skip` share of trades (missed signals / downtime), then random order."""
     rng = np.random.default_rng(seed)
     rets = np.asarray(rets, float)
     n = len(rets)
@@ -332,6 +453,9 @@ def monte_carlo(rets, runs=1000, method="bootstrap", seed=7):
     if method == "bootstrap":
         idx = rng.integers(0, n, size=(runs, n))
         samp = rets[idx]
+    elif method == "skip":
+        samp = np.array([rng.permutation(rets) for _ in range(runs)])
+        samp[rng.random((runs, n)) < skip] = 0.0  # a skipped trade = flat
     else:
         samp = np.array([rng.permutation(rets) for _ in range(runs)])
     paths = np.cumprod(1 + samp, axis=1)
@@ -344,11 +468,11 @@ def monte_carlo(rets, runs=1000, method="bootstrap", seed=7):
 
 
 # ------------------------------------------------------------------ search
-def search(df, cfg, progress=None):
+def search(df, cfg, progress=None, cc=None):
     """cfg: families, n_variants, time_budget, direction, oos_pct, folds, cost_frac, cost_abs,
     min_pf, min_wr, max_dd, min_trades, min_wf, min_stab, oos_min_pf, seed"""
     t0 = time.time()
-    cc = Cache(df)
+    cc = cc if cc is not None else Cache(df)
     n = len(df)
     split = int(n * (1 - cfg["oos_pct"] / 100.0))
     warm = 260  # bars of indicator warm-up
@@ -359,6 +483,9 @@ def search(df, cfg, progress=None):
     seen = set()
     near = []
     tested = 0
+    trial_sr = []            # daily Sharpe of EVERY trial (for the Deflated Sharpe Ratio)
+    pbo_keep = cfg.get("pbo_trials", 800)
+    trial_daily = []         # daily returns of the first `pbo_keep` trials (random sample, for PBO / CSCV)
     for k in range(cfg["n_variants"]):
         if time.time() - t0 > cfg["time_budget"]:
             break
@@ -368,8 +495,12 @@ def search(df, cfg, progress=None):
         if key in seen:
             continue
         seen.add(key)
-        m, tr = run(fam, p, cc, is_start, split, cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], lev=cfg.get("lev", 1.0))
+        m, tr = run(fam, p, cc, is_start, split, cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], lev=cfg.get("lev", 1.0),
+                    daily=True)
         tested += 1
+        trial_sr.append(m["sharpe_d"])
+        if len(trial_daily) < pbo_keep:
+            trial_daily.append(tr["daily"].astype(np.float32))
         ok = (m["pf"] >= cfg["min_pf"] and m["winrate"] >= cfg["min_wr"] and m["maxdd"] <= cfg["max_dd"]
               and m["trades"] >= cfg["min_trades"])
         wf, _ = wf_consistency(tr, is_start, split, cfg["folds"])
@@ -398,5 +529,6 @@ def search(df, cfg, progress=None):
                         stab_pf=stab_pf, overfit=overfit, passed=passed, is_pass=r["is_pass"], oos_ok=oos_ok))
     meta = dict(tested=tested, is_pass=n_is_pass, seconds=time.time() - t0, search_seconds=t_search,
                 split=split, is_start=is_start, n=n, split_time=df.index[split], start_time=df.index[is_start],
-                end_time=df.index[-1])
+                end_time=df.index[-1], trial_sr=np.array(trial_sr),
+                trial_daily=np.vstack(trial_daily) if trial_daily else np.zeros((0, 0), np.float32))
     return out, meta, cc

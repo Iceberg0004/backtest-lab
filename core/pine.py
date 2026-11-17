@@ -42,6 +42,46 @@ def _signals_block(fam, p):
               f"sigLine = ta.ema(macdLine, {p['signal']})",
               "up = ta.crossover(macdLine, sigLine)", "dn = ta.crossunder(macdLine, sigLine)",
               "longEntry = up and trendL", "longExit = dn", "shortEntry = dn and trendS", "shortExit = up"]
+    elif fam == "supertrend":
+        L += [f"stAtr = ta.atr({p['st_len']})", f"stBu = hl2 - {p['st_mult']} * stAtr", f"stBd = hl2 + {p['st_mult']} * stAtr",
+              "var float stUp = na", "var float stDn = na", "var int stDir = 0",
+              "if not na(stAtr)",
+              "    stUp := na(stUp) or close[1] <= stUp ? stBu : math.max(stBu, stUp)",
+              "    stDn := na(stDn) or close[1] >= stDn ? stBd : math.min(stBd, stDn)",
+              "    stDir := stDir == 0 ? 1 : stDir == 1 and close < stUp ? -1 : stDir == -1 and close > stDn ? 1 : stDir",
+              "flipUp = stDir == 1 and stDir[1] == -1", "flipDn = stDir == -1 and stDir[1] == 1",
+              "longEntry = flipUp and trendL", "longExit = flipDn", "shortEntry = flipDn and trendS", "shortExit = flipUp",
+              "plot(stDir == 1 ? stUp : stDir == -1 ? stDn : na, 'Supertrend', color=stDir == 1 ? color.green : color.red, style=plot.style_linebr)"]
+    elif fam == "keltner":
+        L += [f"kcBasis = ta.ema(close, {p['kc_len']})", f"kcUp = kcBasis + {p['kc_mult']} * atr", f"kcLo = kcBasis - {p['kc_mult']} * atr",
+              "longEntry = ta.crossover(close, kcUp) and trendL", "longExit = ta.crossunder(close, kcBasis)",
+              "shortEntry = ta.crossunder(close, kcLo) and trendS", "shortExit = ta.crossover(close, kcBasis)",
+              "plot(kcUp, 'KC upper', color=color.teal)", "plot(kcBasis, 'KC basis', color=color.gray)",
+              "plot(kcLo, 'KC lower', color=color.teal)"]
+    elif fam == "stochrsi":
+        w = p["rsi_len"] + p["stoch_len"] + 3 + 1
+        L += [f"srR = ta.rsi(close, {p['rsi_len']})", f"srH = ta.highest(srR, {p['stoch_len']})", f"srL = ta.lowest(srR, {p['stoch_len']})",
+              "srRng = srH - srL", "srSt = srRng == 0 ? na : 100 * (srR - srL) / srRng", "srK0 = ta.sma(srSt, 3)",
+              f"srK = bar_index < {w} ? na : srK0",
+              f"longEntry = ta.crossover(srK, {p['k_lo']}) and trendL", f"longExit = ta.crossunder(srK, {p['k_hi']})",
+              f"shortEntry = ta.crossunder(srK, {p['k_hi']}) and trendS", f"shortExit = ta.crossover(srK, {p['k_lo']})"]
+    elif fam == "zscore":
+        L += [f"zM = ta.sma(close, {p['z_len']})", f"zSd = ta.stdev(close, {p['z_len']})",
+              f"zV = bar_index < {p['z_len']} or zSd == 0 ? na : (close - zM) / zSd",
+              f"longEntry = ta.crossover(zV, -{p['z_entry']}) and trendL", f"longExit = ta.crossover(zV, {p['z_exit']})",
+              f"shortEntry = ta.crossunder(zV, {p['z_entry']}) and trendS", f"shortExit = ta.crossunder(zV, -{p['z_exit']})",
+              f"plot(zM, 'Z-score mean {p['z_len']}', color=color.gray)"]
+    rg = p.get("regime", 0)
+    if rg:
+        op = ">=" if rg == 1 else "<"
+        L += ["// filter kondisi pasar (ADX 14): " + ("hanya saat trending" if rg == 1 else "hanya saat sideways"),
+              "dUp = high - high[1]", "dDn = low[1] - low",
+              "pDM = na(dUp) ? na : (dUp > dDn and dUp > 0 ? dUp : 0.0)",
+              "mDM = na(dDn) ? na : (dDn > dUp and dDn > 0 ? dDn : 0.0)",
+              "pDI = 100 * ta.rma(pDM, 14) / atr", "mDI = 100 * ta.rma(mDM, 14) / atr", "diSum = pDI + mDI",
+              "adxV = 100 * ta.rma(math.abs(pDI - mDI) / (diSum == 0 ? 1 : diSum), 14)",
+              f"regimeOk = adxV {op} {p['adx_thr']}",
+              "longEntry := longEntry and regimeOk", "shortEntry := shortEntry and regimeOk"]
     return "\n".join(L)
 
 
@@ -54,7 +94,41 @@ trK = input.float({p['trail_atr']}, 'Trailing stop (x ATR, 0 = tidak ada)')
 atr = ta.atr(14)"""
 
 
-def to_pine(fam, p, direction, title, symbol, tf, cost_pct, leverage=1.0, stats_note=""):
+def _esc(t):
+    return str(t).replace('"', "'")
+
+
+def _table(rows, live_strategy):
+    """On-chart stats table. App test results are fixed text; the strategy() version also shows
+    TradingView's own live backtest numbers so the two can be compared."""
+    n = len(rows) + (5 if live_strategy else 0) + 1
+    L = ["// ==== TABLE START (tabel statistik di chart)",
+         "showTable = input.bool(true, 'Tampilkan tabel statistik')",
+         f"var table statsT = table.new(position.top_right, 2, {n}, bgcolor=color.new(color.black, 15), border_width=1)",
+         "if showTable and barstate.islast",
+         '    table.cell(statsT, 0, 0, "Backtest Lab", text_color=color.yellow, text_size=size.small)',
+         '    table.cell(statsT, 1, 0, "hasil uji, bukan saran", text_color=color.gray, text_size=size.small)']
+    r = 1
+    for k, v in rows:
+        L += [f'    table.cell(statsT, 0, {r}, "{_esc(k)}", text_color=color.white, text_size=size.small)',
+              (f'    table.cell(statsT, 1, {r}, pos == 1 ? "LONG" : pos == -1 ? "SHORT" : "Tidak ada posisi", text_color=color.white, text_size=size.small)'
+               if v == "__POS__" else f'    table.cell(statsT, 1, {r}, "{_esc(v)}", text_color=color.white, text_size=size.small)')]
+        r += 1
+    if live_strategy:
+        live = [("TV: net profit", 'str.tostring(strategy.netprofit / strategy.initial_capital * 100, "#.##") + "%"'),
+                ("TV: trades", "str.tostring(strategy.closedtrades)"),
+                ("TV: win rate", 'strategy.closedtrades > 0 ? str.tostring(strategy.wintrades / strategy.closedtrades * 100, "#.#") + "%" : "-"'),
+                ("TV: profit factor", 'strategy.grossloss > 0 ? str.tostring(strategy.grossprofit / strategy.grossloss, "#.##") : "-"'),
+                ("TV: max DD", 'str.tostring(strategy.max_drawdown / strategy.initial_capital * 100, "#.##") + "% (modal awal)"')]
+        for k, expr in live:
+            L += [f'    table.cell(statsT, 0, {r}, "{k}", text_color=color.aqua, text_size=size.small)',
+                  f'    table.cell(statsT, 1, {r}, {expr}, text_color=color.aqua, text_size=size.small)']
+            r += 1
+    L.append("// ==== TABLE END")
+    return "\n".join(L)
+
+
+def to_pine(fam, p, direction, title, symbol, tf, cost_pct, leverage=1.0, stats_note="", table_rows=None):
     name = E.FAMILIES[fam]["name"]
     desc = E.describe(fam, p, direction)
     head = f"""// {title}
@@ -118,6 +192,8 @@ plotshape(allowShort and shortEntry and strategy.position_size >= 0, "Sinyal Sho
 alertcondition(allowLong and longEntry, "Long", "{symbol} {tf}: sinyal LONG")
 alertcondition(allowShort and shortEntry, "Short", "{symbol} {tf}: sinyal SHORT")
 alertcondition(longExit or shortExit, "Exit", "{symbol} {tf}: sinyal EXIT")
+alertcondition(ta.change(strategy.closedtrades) > 0, "Trade selesai", "{symbol} {tf}: posisi ditutup (sinyal/SL/TP) di {{{{close}}}}")
+{_table(table_rows or [], True)}
 """
     indi = head + f"""//@version=5
 indicator("{name} (indikator) - {symbol} {tf}", overlay=true)
@@ -206,5 +282,9 @@ plot(pos != 0 and tpK > 0 ? tgt : na, "Target", color=color.green, style=plot.st
 alertcondition(allowLong and longEntry, "Long", "{symbol} {tf}: sinyal LONG (masuk di open candle berikutnya)")
 alertcondition(allowShort and shortEntry, "Short", "{symbol} {tf}: sinyal SHORT (masuk di open candle berikutnya)")
 alertcondition((pos[1] == 1 and longExit) or (pos[1] == -1 and shortExit), "Exit", "{symbol} {tf}: sinyal EXIT")
+alertcondition(exitStop, "Kena stop loss", "{symbol} {tf}: posisi kena STOP LOSS di {{{{close}}}}")
+alertcondition(exitTp, "Kena take profit", "{symbol} {tf}: posisi kena TAKE PROFIT di {{{{close}}}}")
+alertcondition(goLong or goShort, "Posisi baru dibuka", "{symbol} {tf}: posisi baru dibuka di {{{{open}}}}")
+{_table((table_rows or []) + [("Posisi sekarang", "__POS__")], False)}
 """
     return strat, indi

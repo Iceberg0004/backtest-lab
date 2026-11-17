@@ -110,3 +110,77 @@ def crossunder(a, b):
     a1, b1 = shift(a), shift(b)
     with np.errstate(invalid="ignore"):
         return (a < b) & (a1 >= b1)
+
+
+# ---------------------------------------------------------------- added for regime filter + new families
+# Every formula below is written out explicitly in the Pine export too (core/pine.py),
+# so Python and Pine compute exactly the same numbers.
+def adx(high, low, close, atr14, n=14):
+    """ADX (Wilder) with DM smoothed by rma and divided by ATR(14), same as the Pine block in pine.py."""
+    high, low = np.asarray(high, float), np.asarray(low, float)
+    d_up = high - shift(high)
+    d_dn = shift(low) - low
+    with np.errstate(invalid="ignore"):
+        p_dm = np.where(np.isnan(d_up), np.nan, np.where((d_up > d_dn) & (d_up > 0), d_up, 0.0))
+        m_dm = np.where(np.isnan(d_dn), np.nan, np.where((d_dn > d_up) & (d_dn > 0), d_dn, 0.0))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        p_di = 100 * rma(p_dm, n) / atr14
+        m_di = 100 * rma(m_dm, n) / atr14
+        s = p_di + m_di
+        dx = np.abs(p_di - m_di) / np.where(s == 0, 1.0, s)
+    return 100 * rma(dx, n)
+
+
+@njit(cache=True)
+def _supertrend(hl2, close, atr, f):
+    n = close.shape[0]
+    up = np.full(n, np.nan); dn = np.full(n, np.nan); d = np.zeros(n)
+    pu = np.nan; pd_ = np.nan; dirn = 0.0
+    for i in range(n):
+        a = atr[i]
+        if not np.isnan(a):
+            bu = hl2[i] - f * a
+            bd = hl2[i] + f * a
+            c1 = close[i - 1] if i > 0 else np.nan
+            if np.isnan(pu) or c1 <= pu:
+                pu = bu
+            else:
+                pu = max(bu, pu)
+            if np.isnan(pd_) or c1 >= pd_:
+                pd_ = bd
+            else:
+                pd_ = min(bd, pd_)
+            if dirn == 0.0:
+                dirn = 1.0
+            elif dirn == 1.0 and close[i] < pu:
+                dirn = -1.0
+            elif dirn == -1.0 and close[i] > pd_:
+                dirn = 1.0
+        up[i] = pu; dn[i] = pd_; d[i] = dirn
+    return up, dn, d
+
+
+def supertrend(high, low, close, atr_n, f):
+    """Returns (lower band, upper band, direction 1/-1/0). Mirrors the explicit Pine version."""
+    high, low, close = (np.asarray(a, float) for a in (high, low, close))
+    return _supertrend((high + low) / 2, close, np.asarray(atr_n, float), float(f))
+
+
+def stoch_rsi_k(close, rsi_len, stoch_len, smooth=3):
+    r = rsi(close, rsi_len)
+    hh, ll = rolling_max(r, stoch_len), rolling_min(r, stoch_len)
+    rng = hh - ll
+    with np.errstate(invalid="ignore", divide="ignore"):
+        st = np.where(rng == 0, np.nan, 100 * (r - ll) / rng)
+    k = np.array(sma(st, smooth), dtype=float)
+    w = rsi_len + stoch_len + smooth + 1  # warm-up gate (also in Pine) so na-handling can never differ
+    k[:w] = np.nan
+    return k
+
+
+def zscore(close, n):
+    m, sd = sma(close, n), stdev(close, n)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        z = np.array(np.where(sd == 0, np.nan, (np.asarray(close, float) - m) / sd), dtype=float)
+    z[:n] = np.nan
+    return z

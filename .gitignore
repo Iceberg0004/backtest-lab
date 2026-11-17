@@ -30,3 +30,8 @@ shots/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# parity test artefacts
+tools/pinecheck/node_modules
+tools/pinecheck/case*.json
+node_modules/
