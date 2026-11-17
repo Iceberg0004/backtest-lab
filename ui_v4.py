@@ -491,3 +491,48 @@ def report_html(ctx, ftr, im, om, fm, grade, pine, name):
                    grade, [("Metrik utama", mtab), ("Return bulanan %", mt2), ("Lain-lain", extra)],
                    [("Equity", fe), ("Return bulanan", figs["monthly"]), ("Strategi vs beli & tahan", figs["bench"]), ("Underwater", figs["underwater"])],
                    pine, [f"Biaya trading dihitung. Ukuran posisi {ctx['cfg']['lev']:g}x modal."])
+
+
+# ================================================================== 2D parameter sensitivity
+def _grid_vals(k, v, n=9):
+    if k in ("sl_atr", "tp_atr", "sl_pct", "tp_pct", "trail_atr"):
+        return sorted({round(float(x), 2) for x in np.linspace(max(0.25, v * 0.5), v * 1.5, n)})
+    return sorted({int(round(x)) for x in np.linspace(max(2, v * 0.5), max(v * 1.5, v + 4), n)})
+
+
+def render_sensitivity(ctx):
+    o, cc, cfg = ctx["o"], ctx["cc"], ctx["cfg"]
+    p = E.full_params(o["params"])
+    keys = [k for k, v in E.FAMILIES[o["fam"]]["space"].items() if isinstance(v, tuple) and isinstance(p.get(k), (int, float))]
+    keys += [k for k in (("sl_pct", "tp_pct") if p.get("sl_mode") == 1 else ("sl_atr", "tp_atr")) if p.get(k, 0) > 0]
+    st.markdown("#### 🗺️ Peta sensitivitas parameter")
+    if len(keys) < 2:
+        st.caption("Strategi ini punya kurang dari 2 parameter angka untuk dipetakan.")
+        return
+    c1, c2, c3, c4 = st.columns(4)
+    kx = c1.selectbox("Parameter sumbu X", keys, index=0, key="sens_x")
+    ky = c2.selectbox("Parameter sumbu Y", [k for k in keys if k != kx], index=0, key="sens_y")
+    metric = c3.selectbox("Ukuran", ["pf", "net", "ret_dd"], key="sens_m",
+                          format_func={"pf": "Profit factor", "net": "Net %", "ret_dd": "Return/DD"}.get)
+    per = c4.radio("Data", ["In-sample", "Unseen"], horizontal=True, key="sens_p")
+    if not st.button("🗺️ Buat peta (81 backtest)", key="sens_run"):
+        st.caption("Area hijau yang luas di sekitar titik pilihan = strategi tidak rapuh. Kalau hanya satu kotak yang hijau, kemungkinan kebetulan.")
+        return
+    xs, ys = _grid_vals(kx, p[kx]), _grid_vals(ky, p[ky])
+    s_, e_ = (ctx["is_start"], ctx["split"]) if per == "In-sample" else (ctx["split"], ctx["n"])
+    Z = np.full((len(ys), len(xs)), np.nan)
+    for i, yv in enumerate(ys):
+        for j, xv in enumerate(xs):
+            q = dict(p); q[kx] = xv; q[ky] = yv
+            m, _ = E.run(o["fam"], q, cc, s_, e_, cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], lev=cfg["lev"])
+            if m["trades"] >= 5:
+                Z[i, j] = (m[metric] * 100 if metric == "net" else min(m[metric], 5.0) if metric == "pf" else m[metric])
+    mid = 1.0 if metric == "pf" else 0.0
+    f = go.Figure(go.Heatmap(z=Z, x=[str(x) for x in xs], y=[str(y) for y in ys], colorscale="RdYlGn", zmid=mid,
+                             text=np.vectorize(lambda v: "" if v != v else f"{v:.2f}")(Z), texttemplate="%{text}"))
+    f.add_trace(go.Scatter(x=[str(p[kx])] if str(p[kx]) in [str(x) for x in xs] else [], y=[str(p[ky])], mode="markers",
+                           marker=dict(symbol="x", size=14, color="white"), name="Pilihan sekarang", showlegend=False))
+    f.update_xaxes(title=kx); f.update_yaxes(title=ky)
+    st.plotly_chart(_lay(f, f"{per}: {dict(pf='Profit factor (dipotong di 5)', net='Net %', ret_dd='Return/DD')[metric]}", 460), width='stretch')
+    good = np.nanmean(Z > mid) if np.isfinite(Z).any() else 0
+    st.caption(f"{good * 100:.0f}% kombinasi di peta ini {'untung' if metric != 'pf' else 'PF > 1'}. Kotak kosong = kurang dari 5 trade.")

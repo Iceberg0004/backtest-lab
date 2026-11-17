@@ -581,6 +581,7 @@ with t_res:
                  "🤖 Meta-label", "🧪 Uji ketahanan", "🌍 Multi-aset", "🎯 Realisme", "Export & Simpan"])
             with d_ana:
                 V.render_analytics(ctx, ftr)
+                V.render_sensitivity(ctx)
             with d_size:
                 V.render_sizing(ctx)
             with d_reg:

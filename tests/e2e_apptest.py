@@ -91,6 +91,7 @@ t1 = time.time()
 at.toggle(key="ana_on").set_value(True).run()
 assert not at.exception, [e.message for e in at.exception]
 print("analytics shown", round(time.time() - t1, 1), "s", len(at.get("plotly_chart")), "charts")
+click("🗺️ Buat peta"); print("sensitivity map ok")
 at.toggle(key="ana_on").set_value(False).run()
 at.toggle(key="sz_on").set_value(True).run()
 at.selectbox(key="sz_mode").set_value("risk").run()
