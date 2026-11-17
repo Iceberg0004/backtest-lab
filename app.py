@@ -701,3 +701,16 @@ with t_cmp:
 
 with t_help:
     st.markdown(open("README_ID.md", encoding="utf-8").read() if __import__("os").path.exists("README_ID.md") else "")
+
+
+# give freed memory back to the OS after every run (the free cloud has ~1 GB RAM)
+def _trim_memory():
+    import gc, ctypes
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
+_trim_memory()
