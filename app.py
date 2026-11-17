@@ -52,10 +52,53 @@ defaults = dict(source="binance", symbol="BTCUSDT", tf="1h", direction="both", o
                 min_pf=1.3, min_wr=0.0, max_dd=30.0, min_trades=50, families=list(E.FAMILIES),
                 n_variants=3000, time_budget=120, mode="ketat", algo="random", combo=False, min_wf=60, min_stab=60, oos_min_pf=1.1, lev=1.0,
                 fee=0.10, slip=0.05, spread=1.0, fx_comm=0.0, fx_slip=0.2, refresh=15, prompt="",
-                use_funding=False, use_deriv=False, use_swap=False, swap_long=2.0, swap_short=-0.5)
+                use_funding=False, use_deriv=False, use_swap=False, swap_long=2.0, swap_short=-0.5,
+                crypto_preset="Binance spot (fee 0,1%)", fx_preset="Spread rata-rata (bawaan)", strict_dsr=False)
 for k, v in defaults.items():
     ss.setdefault(k, v)
 ss.families = [f for f in ss.families if f in E.FAMILIES]
+
+
+# broker cost presets (EXAMPLES, always editable). Forex/gold/index: spread multiplier on the typical spread + commission.
+CRYPTO_PRESETS = {"Binance spot (fee 0,1%)": (0.10, 0.05), "Binance spot bayar fee pakai BNB (0,075%)": (0.075, 0.05),
+                  "Binance futures taker (0,05%)": (0.05, 0.03), "Binance futures maker (0,02%)": (0.02, 0.0), "Atur sendiri": None}
+FX_PRESETS = {"Spread rata-rata (bawaan)": (1.0, 0.0), "Akun standar (contoh: spread lebar, tanpa komisi)": (1.6, 0.0),
+              "Akun raw/ECN (contoh: spread tipis + komisi)": (0.35, 0.0035), "Atur sendiri": None}
+
+
+def spread_for(sym):
+    """Spread (pip) for a market: what you set for it in this session, else the typical spread x account preset."""
+    mem = ss.get("cost_mem", {}).get(sym)
+    if mem and "spread" in mem:
+        return mem["spread"]
+    mult = (FX_PRESETS.get(ss.get("fx_preset", "")) or (1.0, 0))[0]
+    return round(FX_SPREAD.get(sym, 1.5) * mult, 2)
+
+
+def _restore_costs():
+    ss.spread = spread_for(ss.symbol)
+    mem = ss.get("cost_mem", {}).get(ss.symbol, {})
+    for k in ("swap_long", "swap_short"):
+        if k in mem:
+            ss[k] = mem[k]
+
+
+def _apply_preset():
+    if ss.source == "binance":
+        v = CRYPTO_PRESETS.get(ss.crypto_preset)
+        if v:
+            ss.fee, ss.slip = v
+    else:
+        v = FX_PRESETS.get(ss.fx_preset)
+        if v:
+            ss.fx_comm = v[1]
+            ss.get("cost_mem", {}).get(ss.symbol, {}).pop("spread", None)
+            ss.spread = spread_for(ss.symbol)
+
+
+def _remember_costs():
+    if ss.source != "binance":
+        ss.setdefault("cost_mem", {})[ss.symbol] = dict(spread=float(ss.spread), swap_long=float(ss.swap_long), swap_short=float(ss.swap_short))
 
 
 def apply_prompt():
@@ -85,14 +128,14 @@ with st.sidebar:
         ss.source = "binance"
     def _on_source():
         ss.symbol = SOURCES[ss.source].symbols()[0]
-        ss.spread = FX_SPREAD.get(ss.symbol, 1.5)
+        _restore_costs()
     st.selectbox("Sumber data", src_keys, key="source", format_func=lambda k: SOURCES[k].label, on_change=_on_source)
     src = SOURCES[ss.source]
     syms = src.symbols()
     custom = st.text_input("Simbol lain (opsional, contoh ETHUSDT / AAPL / ^GSPC)", value="")
     if not custom:
         st.selectbox("Simbol", syms if ss.symbol in syms else syms + [ss.symbol], key="symbol",
-                     on_change=lambda: ss.__setitem__("spread", FX_SPREAD.get(ss.symbol, 1.5)))
+                     on_change=_restore_costs)
     symbol = custom.strip().upper() or ss.symbol
     if ss.tf not in src.timeframes:
         ss.tf = "1h"
@@ -171,7 +214,7 @@ def cost_for(source, sym, price):
     if source == "binance":
         return (ss.fee + ss.slip) / 100, 0.0
     pip = SOURCES[source].pip_size(sym) or 0.0001
-    return ss.fx_comm / 100, (FX_SPREAD.get(sym, ss.spread) / 2 + ss.fx_slip) * pip
+    return ss.fx_comm / 100, ((ss.spread if sym == symbol else spread_for(sym)) / 2 + ss.fx_slip) * pip
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -384,14 +427,20 @@ with t_search:
         st.number_input("Profit factor minimal di data unseen", 0.5, 5.0, step=0.1, key="oos_min_pf")
     with c:
         if ss.source == "binance":
+            st.selectbox("Preset biaya", list(CRYPTO_PRESETS), key="crypto_preset", on_change=_apply_preset,
+                         help="Contoh tarif umum. Angka di bawah tetap bisa diubah.")
             st.number_input("Fee per transaksi (%)", 0.0, 1.0, step=0.01, key="fee")
             st.number_input("Slippage per transaksi (%)", 0.0, 1.0, step=0.01, key="slip")
         else:
             pip = src.pip_size(symbol) or 0.0001
-            st.number_input(f"Spread (pip) · 1 pip = {pip:g}", 0.0, 50.0, step=0.1, key="spread")
+            st.selectbox("Preset akun broker", list(FX_PRESETS), key="fx_preset", on_change=_apply_preset,
+                         help="Contoh saja (bukan broker tertentu). Spread disimpan per pasar selama sesi ini dan tetap bisa diubah.")
+            st.number_input(f"Spread {symbol} (pip) · 1 pip = {pip:g}", 0.0, 50.0, step=0.1, key="spread", on_change=_remember_costs)
             st.number_input("Slippage per sisi (pip)", 0.0, 20.0, step=0.1, key="fx_slip")
             st.number_input("Komisi per sisi (%)", 0.0, 0.5, step=0.001, format="%.3f", key="fx_comm")
         st.number_input("Ukuran posisi (x modal, 1 = tanpa leverage)", 0.1, 20.0, step=0.5, key="lev")
+        st.checkbox("Rapor pakai DSR versi ketat (buku teks)", key="strict_dsr",
+                    help="Anggap semua variasi yang dicoba benar-benar terpisah. Nilai rapor jadi lebih pelit. Bisa diubah kapan saja.")
         st.slider("Minimal parameter tetangga yang tetap untung (%)", 0, 100, key="min_stab",
                   help="Kalau EMA 11/36 bagus tapi 12/35 hancur, berarti cuma kebetulan.")
         if ss.source == "binance":
@@ -402,8 +451,8 @@ with t_search:
                         help="Perkiraan swap broker per tahun, dihitung sesuai lama posisi dibuka (termasuk akhir pekan).")
             if ss.use_swap:
                 s1, s2 = st.columns(2)
-                s1.number_input("Swap Long (%/tahun, + = bayar)", -20.0, 20.0, step=0.25, key="swap_long")
-                s2.number_input("Swap Short (%/tahun, + = bayar)", -20.0, 20.0, step=0.25, key="swap_short")
+                s1.number_input("Swap Long (%/tahun, + = bayar)", -20.0, 20.0, step=0.25, key="swap_long", on_change=_remember_costs)
+                s2.number_input("Swap Short (%/tahun, + = bayar)", -20.0, 20.0, step=0.25, key="swap_short", on_change=_remember_costs)
                 st.caption("Lihat angka swap di spesifikasi kontrak brokermu. Contoh: kalau broker memotong 2% setahun untuk Long, isi 2.")
     st.multiselect("Jenis strategi yang dicari", list(E.FAMILIES), key="families", format_func=lambda k: E.FAMILIES[k]["name"])
     bad_tf = [E.FAMILIES[f]["name"] for f in ss.families if E.FAMILIES[f]["intraday"] and TF_MINUTES.get(tf, 60) > 60]

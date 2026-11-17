@@ -48,12 +48,18 @@ def after_search(res, cc):
 
 
 # ------------------------------------------------------------------ report card
+def dsr_pick(d):
+    """DSR used for the grade: the textbook strict version if the user switched it on."""
+    d = d or {}
+    return d.get("dsr_strict") if st.session_state.get("strict_dsr") else d.get("dsr")
+
+
 def grade_inputs(o, res, t):
     st_ = res.get("search_tests", {})
     pbo = st_.get("pbo")
     wfo = st_.get("wfo")
     b = t.get("basket")
-    return dict(oos_pass=bool(t.get("strict_pass", o["passed"])), dsr=t.get("dsr", {}).get("dsr"), pbo=pbo["pbo"] if pbo else None,
+    return dict(oos_pass=bool(t.get("strict_pass", o["passed"])), dsr=dsr_pick(t.get("dsr")), pbo=pbo["pbo"] if pbo else None,
                 perm_p=t["perm"]["p"] if "perm" in t else None,
                 wfe=(wfo["wfe"] if wfo and not math.isnan(wfo["wfe"]) else (0.0 if wfo else None)),
                 jitter=t["jitter"]["share_profit"] if "jitter" in t else None,

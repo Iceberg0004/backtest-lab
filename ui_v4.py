@@ -8,6 +8,11 @@ import streamlit as st
 import plotly.graph_objects as go
 from core import engine as E, robust as R, analytics as A, risk as K
 
+
+def _dsr_pick(d):
+    d = d or {}
+    return d.get("dsr_strict") if st.session_state.get("strict_dsr") else d.get("dsr")
+
 ss = st.session_state
 TZ = "Asia/Jakarta"
 GREEN, RED, BLUE = "#26a69a", "#ef5350", "#29b6f6"
@@ -376,7 +381,7 @@ def render_ml(res, dfc, cc):
     im, om = r["is_m"], r["oos_m"]
     min_oos_tr = max(3, cfg["min_trades"] * cfg["oos_pct"] / max(1, 100 - cfg["oos_pct"]) * 0.3)
     oos_pass = bool(om["net"] > 0 and om["pf"] >= cfg["oos_min_pf"] and om["maxdd"] <= cfg["max_dd"] and om["trades"] >= min_oos_tr)
-    gi = dict(oos_pass=oos_pass, dsr=r["dsr"].get("dsr"), cost2x=r["cost2x"]["net"] > 0)
+    gi = dict(oos_pass=oos_pass, dsr=_dsr_pick(r["dsr"]), cost2x=r["cost2x"]["net"] > 0)
     score, letter, parts = R.grade(gi)
     colors = {"A": "#00c853", "B": "#64dd17", "C": "#ffd600", "D": "#ff9100", "E": "#ff1744"}
     st.markdown(f"<div style='padding:8px 12px;border-radius:8px;background:#1e1e1e;border-left:6px solid {colors.get(letter, '#888')}'>"
@@ -394,7 +399,7 @@ def render_ml(res, dfc, cc):
     c[1].metric("AUC short (CV → unseen)", f"{auc.get('short_cv', float('nan')):.3f} → {auc.get('short_oos', float('nan')):.3f}")
     c[2].metric("Peluang menang acak", f"L {_pct(r['base'][0], 0)} · S {_pct(r['base'][1], 0)}",
                 help="Seberapa sering target tersentuh duluan kalau masuk di sembarang candle. Model harus lebih baik dari ini.")
-    c[3].metric("DSR", _pct(r["dsr"].get("dsr"), 0))
+    c[3].metric("DSR (ketat)" if st.session_state.get("strict_dsr") else "DSR", _pct(_dsr_pick(r["dsr"]), 0))
     st.caption("AUC 0,50 = sama dengan menebak. Model pasar biasanya hanya 0,52-0,56; selisih kecil itu sering habis dimakan biaya.")
     eq = r["oos_tr"]["equity"]
     if eq is not None and len(eq):
