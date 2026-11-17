@@ -360,6 +360,8 @@ def fetch_dukascopy_freeserv(
             break
         batch = []
         for item in payload:
+            if not item or len(item) < 5 or any(x is None for x in item[:5]):
+                continue   # freeserv sends null rows for some instruments/minutes (e.g. US30)
             ts = datetime.fromtimestamp(item[0] / 1000, tz=timezone.utc)
             if ts > end_dt:
                 continue

@@ -187,13 +187,23 @@ def deriv_on():
 
 
 def get_data(show=True):
+    key = (ss.source, symbol, tf, str(start_date), deriv_on())
     try:
         if show:
             with st.spinner(f"Mengambil data {symbol} {tf} (pertama kali bisa agak lama, berikutnya hanya candle baru)" +
                             (" + data derivatif (pertama kali 2-4 menit)" if deriv_on() else "") + "..."):
-                return load(ss.source, symbol, tf, start_date, deriv_on())
-        return load(ss.source, symbol, tf, start_date, deriv_on())
+                df = load(ss.source, symbol, tf, start_date, deriv_on())
+        else:
+            df = load(ss.source, symbol, tf, start_date, deriv_on())
+        if df is None or not len(df):
+            raise ValueError("data kosong")
+        ss["_last_df"] = (key, df)   # one market only (same object as the loader cache, no extra copy)
+        return df
     except Exception as e:
+        last = ss.get("_last_df")
+        if last and last[0] == key:   # a short hiccup of the free source: keep working with the data we already have
+            st.caption(f"⚠️ Gagal mengambil candle terbaru ({str(e)[:80]}). Memakai data terakhir yang sudah ada.")
+            return last[1]
         st.error(f"Gagal mengambil data: {e}")
         return None
 
