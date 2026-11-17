@@ -201,7 +201,7 @@ def funding_carry(cc, tf, s, note=""):
     covered_from = s.index[0] if len(s) else None
     covered_to = s.index[-1] if len(s) else None
     if len(s):
-        pos = np.searchsorted(idx.asi8, s.index.asi8, side="right") - 1   # bar that contains the funding time
+        pos = np.searchsorted(pd.DatetimeIndex(idx).as_unit("ms").asi8, pd.DatetimeIndex(s.index).as_unit("ms").asi8, side="right") - 1   # bar that contains the funding time
         ok = pos >= 0
         np.add.at(carry, pos[ok], s.to_numpy()[ok])
     # baseline where we have no history: 3 payments per day spread over bars
@@ -218,7 +218,7 @@ def funding_carry(cc, tf, s, note=""):
 def swap_carry(cc, long_pct_year, short_pct_year):
     """FX/gold swap approximation: yearly cost in % of position (positive = you pay, negative = you receive),
     charged pro-rata to the real time each bar is held (so weekends are counted, like triple-swap Wednesdays)."""
-    t = cc.index.asi8.astype(float) / 1e9
+    t = pd.DatetimeIndex(cc.index).as_unit("ms").asi8.astype(float) / 1e3
     dt_days = np.diff(np.r_[t, t[-1] + (t[-1] - t[-2] if len(t) > 1 else 0)]) / 86400
     cl = long_pct_year / 100 / 365 * dt_days
     cs = short_pct_year / 100 / 365 * dt_days
