@@ -342,10 +342,11 @@ def portfolio(cands, cc, start, end, split, cfg, max_n=5, max_corr=0.5):
     idx = cc.index[de]
     D = pd.DataFrame(series, index=idx)
     keep = []
+    Dis = D[D.index < cc.index[split]]          # choose with in-sample correlations only (unseen part stays an exam)
     for lab in D.columns:
-        if D[lab].std() == 0:
+        if Dis[lab].std() == 0:
             continue
-        if all(abs(D[lab].corr(D[k])) < max_corr for k in keep):
+        if all(abs(Dis[lab].corr(Dis[k])) < max_corr for k in keep):
             keep.append(lab)
         if len(keep) >= max_n:
             break
@@ -366,6 +367,39 @@ def portfolio(cands, cc, start, end, split, cfg, max_n=5, max_corr=0.5):
     return dict(keep=keep, corr=D.corr().loc[keep, keep] if len(keep) > 1 else D[keep].corr(), all_corr=D.corr(),
                 equity=eq, dd=dd, comb=comb, single=sel, stats_all=stats(comb), stats_is=stats(comb[comb.index < split_t]),
                 stats_oos=stats(comb[comb.index >= split_t]), ind_stats=ind_stats)
+
+
+def similarity(cands, cc, start, end, cfg, thr=0.8):
+    """Correlation of daily returns (in-sample window given by start/end), a cluster order for the heatmap and
+    groups of near-duplicates (|corr| >= thr, joined transitively). cands ordered by preference."""
+    series = {}
+    for lab, fam, p in cands:
+        _, tr = E.run(fam, p, cc, start, end, cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], lev=cfg.get("lev", 1.0), daily=True)
+        if np.std(tr["daily"]) > 0:
+            series[lab] = tr["daily"]
+    if len(series) < 2:
+        return None
+    D = pd.DataFrame(series)
+    C = D.corr().fillna(0.0)
+    labs = list(C.columns)
+    # groups: union-find on |corr| >= thr
+    parent = list(range(len(labs)))
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]; i = parent[i]
+        return i
+    A = np.abs(C.to_numpy())
+    for i in range(len(labs)):
+        for j in range(i + 1, len(labs)):
+            if A[i, j] >= thr:
+                parent[find(i)] = find(j)
+    groups = {}
+    for i in range(len(labs)):
+        groups.setdefault(find(i), []).append(labs[i])
+    groups = sorted(groups.values(), key=lambda g: labs.index(g[0]))
+    # heatmap order: groups together, members in preference order
+    order = [x for g in groups for x in g]
+    return dict(corr=C.loc[order, order], groups=groups, n=len(labs))
 
 
 # ------------------------------------------------------------------ 6) one clear score

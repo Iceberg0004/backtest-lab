@@ -125,16 +125,41 @@ def triple_barrier(c, h, l, atr, pt, sl, H, end):
     return lw, sw, ok
 
 
+_DROP = None
+
+
+def _drop_empty():
+    """sklearn step that removes feature columns with no usable data in the training rows (e.g. open interest
+    before 2020) and applies the same choice at prediction time."""
+    global _DROP
+    if _DROP is None:
+        from sklearn.base import BaseEstimator, TransformerMixin
+
+        class DropEmpty(TransformerMixin, BaseEstimator):
+            def fit(self, X, y=None):
+                X = np.asarray(X, float)
+                fin = np.isfinite(X)
+                with np.errstate(invalid="ignore"):
+                    lo = np.where(fin, X, np.inf).min(0); hi = np.where(fin, X, -np.inf).max(0)
+                self.keep_ = np.flatnonzero((fin.sum(0) >= 20) & (hi > lo))
+                return self
+
+            def transform(self, X):
+                return np.asarray(X)[:, self.keep_]
+        _DROP = DropEmpty
+    return _DROP()
+
+
 def _model(kind, n):
+    from sklearn.pipeline import make_pipeline
     if kind == "logreg":
-        from sklearn.pipeline import make_pipeline
         from sklearn.preprocessing import StandardScaler
         from sklearn.impute import SimpleImputer
         from sklearn.linear_model import LogisticRegression
-        return make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), LogisticRegression(C=0.1, max_iter=300))
+        return make_pipeline(_drop_empty(), SimpleImputer(strategy="median"), StandardScaler(), LogisticRegression(C=0.1, max_iter=300))
     from sklearn.ensemble import HistGradientBoostingClassifier
-    return HistGradientBoostingClassifier(max_iter=150, learning_rate=0.05, max_leaf_nodes=15,
-                                          min_samples_leaf=max(20, n // 200), l2_regularization=1.0, random_state=0)
+    return make_pipeline(_drop_empty(), HistGradientBoostingClassifier(max_iter=150, learning_rate=0.05, max_leaf_nodes=15,
+                                                                      min_samples_leaf=max(20, n // 200), l2_regularization=1.0, random_state=0))
 
 
 def purged_folds(start, end, k, purge, embargo):

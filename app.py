@@ -782,6 +782,7 @@ with t_port:
     got = _res_data()
     if got:
         U.render_portfolio(*got)
+        V.render_similarity(*got)
 
 with t_cmp:
     def _load_any(source, sym, tf_, start, deriv=False):

@@ -570,3 +570,39 @@ def render_scan_matrix(rows):
                               zmin=0, zmax=100, hovertemplate="%{y}<br>%{x}: %{z:.0f}/100<extra></extra>"))
     st.plotly_chart(_lay(f2, "Rapor tiap jenis strategi (✓ = lolos tes dasar)", max(320, 22 * len(fams) + 120)), width='stretch')
     st.caption("Jenis strategi yang hijau di banyak pasar/timeframe lebih bisa dipercaya daripada yang hanya bagus di satu tempat.")
+
+
+# ================================================================== strategy similarity / clusters
+def render_similarity(res, dfc, cc):
+    cfg, meta = res["cfg"], res["meta"]
+    st.markdown("#### 🔗 Kemiripan strategi")
+    st.caption("Banyak hasil pencarian sebenarnya strategi yang hampir sama (return hariannya bergerak bersamaan). "
+               "Di sini strategi dikelompokkan dari korelasi return harian di data in-sample saja.")
+    a, b = st.columns(2)
+    thr = a.slider("Dianggap kembar kalau korelasi ≥", 0.5, 0.95, 0.8, 0.05, key="sim_thr")
+    nmax = b.select_slider("Jumlah strategi dibandingkan", [10, 20, 30, 40], value=20, key="sim_n")
+    if st.button("🔗 Hitung kemiripan", key="sim_run"):
+        out = res["out"]
+        order = [i for i, o in enumerate(out) if o["passed"]] + [i for i, o in enumerate(out) if not o["passed"]]
+        cands = [(f"#{i + 1} {E.FAMILIES[out[i]['fam']]['name'][:20]}", out[i]["fam"], out[i]["params"]) for i in order[:nmax]]
+        with st.spinner("Menghitung korelasi..."):
+            res.setdefault("search_tests", {})["sim"] = (thr, nmax, R.similarity(cands, cc, meta["is_start"], meta["split"], cfg, thr))
+    got = res.get("search_tests", {}).get("sim")
+    if not got or got[2] is None:
+        if got:
+            st.info("Strategi yang punya trade kurang dari 2.")
+        return
+    _, _, s = got
+    groups = s["groups"]
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Strategi dibandingkan", s["n"]); c2.metric("Kelompok berbeda", len(groups))
+    c3.metric("Duplikat (bisa dibuang)", s["n"] - len(groups))
+    C = s["corr"]
+    f = go.Figure(go.Heatmap(z=C.values, x=list(C.columns), y=list(C.index), zmin=-1, zmax=1, colorscale="RdBu_r",
+                             hovertemplate="%{y}<br>%{x}<br>korelasi %{z:.2f}<extra></extra>"))
+    st.plotly_chart(_lay(f, "Korelasi return harian in-sample (diurutkan per kelompok)", max(380, 18 * len(C) + 140)), width='stretch')
+    rows = [{"Kelompok": k + 1, "Wakil (peringkat in-sample terbaik)": g[0], "Anggota": len(g), "Kembarannya": ", ".join(g[1:]) or "-"}
+            for k, g in enumerate(groups)]
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
+    st.caption("Untuk portofolio, ambil satu wakil dari tiap kelompok. Tombol 'Buat portofolio' di atas memilih otomatis 3-5 strategi "
+               "dengan korelasi rendah (juga dari data in-sample saja), lalu menunjukkan hasilnya di data unseen.")
