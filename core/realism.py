@@ -189,11 +189,14 @@ def funding_history(symbol, start, end):
     return s, note
 
 
-def funding_carry(cc, symbol, tf):
+def funding_series(symbol):
+    return funding_history(symbol, pd.Timestamp("2019-09-01", tz="UTC"), pd.Timestamp.now(tz="UTC"))
+
+
+def funding_carry(cc, tf, s, note=""):
     """Per-bar funding for a LONG position (short gets the opposite). Bars before the perpetual existed,
     or not covered by the data, use the 0.01%/8h baseline. Returns (carry_long, carry_short, info)."""
     idx = cc.index
-    s, note = funding_history(symbol, idx[0], idx[-1])
     carry = np.zeros(len(idx))
     covered_from = s.index[0] if len(s) else None
     covered_to = s.index[-1] if len(s) else None

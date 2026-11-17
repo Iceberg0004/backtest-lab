@@ -26,6 +26,15 @@ Rincian sumber ada di [DATA_SOURCES.md](DATA_SOURCES.md). Panduan pemakaian lebi
 - **Jumlah trade minimal**, serta fee, slippage, dan spread selalu dihitung.
 - **Monte Carlo.** Urutan trade diacak 1000 kali.
 - Urutan hasil hanya berdasarkan data pencarian (in-sample). Status **⚠️ Overfit** berarti hasil di data unseen jauh lebih buruk.
+- **Tambahan (v2):** Deflated Sharpe Ratio, PBO (CSCV), tes harga acak (bar permutation) untuk strategi dan untuk seluruh pencarian,
+  geser parameter, biaya 2x/3x, walk-forward optimisation sungguhan (anchored/rolling, kurva OOS disambung + WFE),
+  multi-aset, portofolio strategi berkorelasi rendah, cek urutan SL/TP pakai candle 1 menit, funding Binance dan swap forex,
+  filter ADX, 9 jenis strategi, rapor A–E, simpan/bandingkan strategi lewat JSON. Detail di [README_ID.md](README_ID.md).
+
+## Tes
+
+- `python tests/e2e_apptest.py binance BTCUSDT` (juga `dukascopy EURUSD carry`, `dukascopy XAUUSD`): klik semua tombol lewat Streamlit AppTest.
+- `tools/pinecheck`: kecocokan Python vs Pine (PineTS) untuk semua jenis strategi.
 
 ## Menjalankan di komputer sendiri
 

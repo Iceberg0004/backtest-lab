@@ -127,16 +127,25 @@ def permute_bars(df, rng, keep=0):
     return out
 
 
-def perm_test(fam, p, df, cfg, start, n_perm=200, seed=3, progress=None):
+def _cache_like(d, base=None, upto=None):
+    """New indicator cache for (synthetic) prices that keeps the same holding costs as `base`."""
+    cc = E.Cache(d)
+    if base is not None:
+        cc.carry_long = base.carry_long[:len(d)].copy()
+        cc.carry_short = base.carry_short[:len(d)].copy()
+    return cc
+
+
+def perm_test(fam, p, df, cfg, start, n_perm=200, seed=3, progress=None, base=None):
     """Fixed strategy on n_perm shuffled price series. p-value = share of fake series where the strategy did
     at least as well as on the real one. Small p (< 0.05) = the edge needs the real price structure."""
-    cc = E.Cache(df)
+    cc = _cache_like(df, base)
     real, _ = E.run(fam, p, cc, start, len(df), cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], lev=cfg.get("lev", 1.0))
     rng = np.random.default_rng(seed)
     nets = []
     for k in range(n_perm):
         d2 = permute_bars(df, rng, keep=start)
-        m, _ = E.run(fam, p, E.Cache(d2), start, len(df), cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], lev=cfg.get("lev", 1.0))
+        m, _ = E.run(fam, p, _cache_like(d2, base), start, len(df), cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], lev=cfg.get("lev", 1.0))
         nets.append(m["net"])
         if progress and k % 10 == 0:
             progress((k + 1) / n_perm)
@@ -145,14 +154,14 @@ def perm_test(fam, p, df, cfg, start, n_perm=200, seed=3, progress=None):
     return dict(real=real["net"], perm=nets, p=pval, n=n_perm)
 
 
-def perm_search_test(df, cfg, is_start, split, n_perm=20, variants=300, seed=5, progress=None):
+def perm_search_test(df, cfg, is_start, split, n_perm=20, variants=300, seed=5, progress=None, base=None):
     """Selection-bias test: run the same small search on the real in-sample data and on n_perm shuffled copies.
     If the best result on fake data is often as good as on real data, the search is just finding noise."""
     rng = np.random.default_rng(seed)
     min_tr = cfg["min_trades"]
 
     def best_score(d):
-        cc = E.Cache(d)
+        cc = _cache_like(d, base)
         _, best_any = _quick_search(cc, is_start, split, cfg, variants, np.random.default_rng(seed), min_tr)
         return best_any[2]["ret_dd"] if best_any else 0.0
 
@@ -228,16 +237,46 @@ def psr(dr, sr_star=0.0):
     return float(_N.cdf((sr - sr_star) * math.sqrt(T - 1) / math.sqrt(den)))
 
 
-def deflated_sharpe(dr, trial_sr):
-    """DSR = PSR against the Sharpe you would expect from the BEST of N random trials (N = variants tested).
-    Uses the variance of the Sharpe ratios of all trials. Close to 1 = edge survives the number of tries."""
+def _sr0(N, sd):
+    """Expected maximum Sharpe among N independent trials whose estimated Sharpe ratios have std `sd`
+    while their TRUE Sharpe is zero (False Strategy Theorem, Bailey & Lopez de Prado)."""
+    if N < 2:
+        return 0.0
+    return sd * ((1 - EULER) * _N.inv_cdf(1 - 1 / N) + EULER * _N.inv_cdf(1 - 1 / (N * math.e)))
+
+
+def effective_trials(M):
+    """Effective number of independent trials from the correlation of the trials' daily returns
+    (participation ratio of the eigenvalues). Many variants are near copies of each other
+    (EMA 20/100 vs EMA 21/100), so the effective number is much smaller than the raw count."""
+    M = np.asarray(M, float)
+    if M.ndim != 2 or M.shape[0] < 3:
+        return None
+    M = M[M.std(1) > 0]
+    if len(M) < 3:
+        return None
+    ev = np.clip(np.linalg.eigvalsh(np.corrcoef(M)), 0, None)
+    return float(ev.sum() ** 2 / (ev ** 2).sum())
+
+
+def deflated_sharpe(dr, trial_sr, n_eff=None):
+    """Deflated Sharpe Ratio = PSR measured against the Sharpe the best of N worthless trials would show by luck.
+    Main value: N = effective number of independent trials, std of a Sharpe estimate under the null = 1/sqrt(T-1).
+    Strict value: N = every variant tested and the empirical spread of all trials' Sharpe ratios (very harsh when
+    many variants lose money because of costs). Both are returned; values close to 1 = edge survives the search."""
+    dr = np.asarray(dr, float)
     trial_sr = np.asarray(trial_sr, float)
     N = len(trial_sr)
-    if N < 2:
-        return dict(dsr=float("nan"), sr0=float("nan"), sr=E.sharpe(dr), N=N)
-    v = float(np.var(trial_sr, ddof=1))
-    sr0 = math.sqrt(max(v, 0)) * ((1 - EULER) * _N.inv_cdf(1 - 1 / N) + EULER * _N.inv_cdf(1 - 1 / (N * math.e)))
-    return dict(dsr=psr(dr, sr0), sr0=sr0, sr=E.sharpe(dr), N=N, T=len(dr))
+    T = len(dr)
+    out = dict(sr=E.sharpe(dr), N=N, T=T, n_eff=n_eff, dsr=float("nan"), dsr_strict=float("nan"), sr0=float("nan"), sr0_strict=float("nan"))
+    if T < 10 or N < 2:
+        return out
+    ne = max(2.0, min(float(N), n_eff if n_eff else float(N)))
+    out["sr0"] = _sr0(ne, 1 / math.sqrt(T - 1))
+    out["dsr"] = psr(dr, out["sr0"])
+    out["sr0_strict"] = _sr0(N, math.sqrt(max(float(np.var(trial_sr, ddof=1)), 0)))
+    out["dsr_strict"] = psr(dr, out["sr0_strict"])
+    return out
 
 
 def pbo_cscv(M, S=12):

@@ -25,9 +25,14 @@ Backtest hanya memakai candle yang **sudah tutup**.
    - Chart dengan garis indikator dan label Long/Short/Exit beserta P&L.
    - Performance: equity curve dan P&L harian/mingguan/bulanan.
    - Trades: daftar transaksi.
-   - Monte Carlo.
-   - Export Pine Script.
-4. **Tab "Chart Live":** chart realtime. Kalau strategi sudah dipilih, garis dan sinyalnya ikut tampil, dan kamu bisa lihat apakah strategi sedang dalam posisi.
+   - Monte Carlo (bootstrap, acak urutan, atau lewatkan 10% trade).
+   - **🧪 Uji ketahanan**, **🌍 Multi-aset**, **🎯 Realisme** (lihat di bawah).
+   - Export Pine Script dan simpan strategi (JSON).
+   - Di atasnya ada **Rapor ketahanan** (A sampai E, skor 0–100).
+4. **Tab "Walk-forward":** optimasi ulang sungguhan dari waktu ke waktu.
+5. **Tab "Portofolio":** gabungkan beberapa strategi yang tidak bergerak bersamaan.
+6. **Tab "Simpan & Bandingkan":** upload file JSON strategi lama, uji ulang di data terbaru, bandingkan.
+7. **Tab "Chart Live":** chart realtime. Kalau strategi sudah dipilih, garis dan sinyalnya ikut tampil, dan kamu bisa lihat apakah strategi sedang dalam posisi.
 
 ## Cara mencegah "overfitting" (strategi yang cuma cocok dengan data lama)
 - **Data unseen.** Bagian data terbaru (misalnya 30%) tidak dipakai saat mencari. Strategi harus tetap bagus di bagian ini.
@@ -38,10 +43,30 @@ Backtest hanya memakai candle yang **sudah tutup**.
 - Urutan hasil hanya berdasarkan data pencarian (in-sample). Data unseen hanya dipakai sebagai ujian, bukan untuk memilih.
 - Status **⚠️ Overfit** berarti hasil di data unseen jauh lebih buruk, jadi strategi itu jangan dipakai.
 
+## Tes tambahan (lebih ketat dari sekadar data unseen)
+Semua tes berat hanya jalan kalau tombolnya diklik.
+- **Deflated Sharpe Ratio (DSR).** Makin banyak variasi dicoba, makin gampang dapat hasil bagus karena kebetulan. DSR mengoreksi itu (memakai jumlah variasi yang benar-benar berbeda; versi paling ketat juga ditampilkan). Di atas 95% bagus. Otomatis dihitung.
+- **Peluang overfit (PBO).** Data pencarian dipotong 12 bagian dan dicoba 924 cara bagi-dua. Dihitung seberapa sering "juara" di satu separuh jadi di bawah rata-rata di separuh lain. Di bawah 20% bagus. Otomatis dihitung.
+- **Tes harga acak.** Urutan candle diacak ratusan kali (pola pasarnya hilang). Strategi yang bagus harus jauh lebih jelek di harga palsu. Hasilnya p-value: di bawah 0,05 bagus.
+- **Tes pencarian acak.** Seluruh pencarian diulang di harga acak. Kalau juara di harga acak sama hebatnya, berarti pencarian cuma menemukan kebetulan.
+- **Geser parameter.** Semua angka pengaturan digeser acak ±10–30%. Strategi yang kuat tetap untung.
+- **Biaya 2x dan 3x.** Apakah masih untung kalau biaya lebih mahal.
+- **Walk-forward sungguhan.** Di tiap jendela waktu, strategi dicari ulang hanya dari data sebelumnya, lalu dipakai di jendela berikutnya. Hasilnya disambung jadi satu kurva, plus *walk-forward efficiency* (≥ 0,5 sehat).
+- **Multi-aset.** Strategi yang sama persis dijalankan di aset lain (misalnya BTC, ETH, SOL, BNB, XRP, atau EURUSD, GBPUSD, USDJPY, AUDUSD, XAUUSD).
+- **Rapor ketahanan.** Semua tes di atas digabung jadi satu skor. Hanya tes yang sudah dijalankan yang dihitung.
+
+## Lebih realistis
+- **Urutan SL/TP asli.** Kalau satu candle menyentuh stop loss dan take profit sekaligus, aplikasi bisa membuka candle 1 menit untuk tahu mana yang duluan (default tetap menganggap SL duluan).
+- **Funding rate** (crypto, seperti perpetual futures) dari riwayat funding Binance, dan **swap** forex/emas dengan angka per tahun yang kamu isi.
+- **Filter kondisi pasar (ADX)** ikut dicari: hanya trading saat trending, hanya saat sideways, atau tanpa filter.
+- **9 jenis strategi:** MA cross, RSI, Donchian, Bollinger squeeze, MACD, Supertrend, Keltner, Stoch RSI pullback, Z-score.
+
 ## Export ke TradingView
 Ada dua file `.pine` (Pine Script v5):
 - **strategy**: menampilkan hasil backtest di TradingView.
 - **indicator**: hanya label Long/Short/Exit, dan bisa dipasang alert.
+
+Keduanya punya **tabel statistik** di pojok chart (hasil uji aplikasi; versi strategy juga menampilkan hasil TradingView sendiri) dan **alert** untuk sinyal Long/Short/Exit, kena stop loss, kena take profit, dan posisi baru. Semua 9 jenis strategi sudah dicek dengan PineTS (emulator Pine open-source): entry dan exit sama persis dengan aplikasi.
 
 Caranya: buka TradingView → Pine Editor → tempel kodenya → Add to chart, di simbol dan timeframe yang sama.
 Hasil di TradingView bisa sedikit berbeda karena:
@@ -69,7 +94,8 @@ API key OANDA atau Twelve Data (opsional) diisi di Secrets Streamlit Cloud denga
 
 ## Batasan (penting)
 - **Backtest bukan jaminan untung.** Hasil masa lalu tidak menjamin masa depan.
-- Belum termasuk swap/bunga menginap forex, funding rate futures, dan likuidasi saat memakai leverage.
+- Funding dan swap adalah perkiraan (swap pakai angka yang kamu isi). Likuidasi saat memakai leverage belum dihitung.
+- Skor rapor dan semua tes adalah hasil uji data lama, bukan saran trading.
 - Harga Dukascopy adalah BID. Spread ditambahkan lewat pengaturan spread (pip).
 - Data gratis bisa sesekali error atau terlambat. Kalau itu terjadi, klik ulang atau tunggu sebentar.
 - Data Dukascopy hanya untuk pemakaian pribadi non-komersial (sesuai ketentuan mereka). Jangan dibagikan ulang.

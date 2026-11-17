@@ -19,6 +19,8 @@ from core.data import SOURCES, KEY_SOURCES, closed_only, TF_MINUTES
 from core import engine as E
 from core.pine import to_pine
 from core.prompt import parse
+from core import robust as R, realism as X
+import ui_extra as U
 import threading
 
 def _bg_probe():
@@ -41,9 +43,11 @@ ss = st.session_state
 defaults = dict(source="binance", symbol="BTCUSDT", tf="1h", direction="both", oos_pct=30, folds=4,
                 min_pf=1.3, min_wr=0.0, max_dd=30.0, min_trades=50, families=list(E.FAMILIES),
                 n_variants=3000, time_budget=120, min_wf=60, min_stab=60, oos_min_pf=1.1, lev=1.0,
-                fee=0.10, slip=0.05, spread=1.0, fx_comm=0.0, fx_slip=0.2, refresh=15, prompt="")
+                fee=0.10, slip=0.05, spread=1.0, fx_comm=0.0, fx_slip=0.2, refresh=15, prompt="",
+                use_funding=False, use_swap=False, swap_long=2.0, swap_short=-0.5)
 for k, v in defaults.items():
     ss.setdefault(k, v)
+ss.families = [f for f in ss.families if f in E.FAMILIES]
 
 
 def apply_prompt():
@@ -123,11 +127,49 @@ def cost_params(price):
     return cf, ca, ss.fx_comm + ca / price * 100
 
 
+def cost_for(source, sym, price):
+    """(cost_frac, cost_abs) for any symbol with the current cost settings (used by multi-asset / compare)."""
+    if source == "binance":
+        return (ss.fee + ss.slip) / 100, 0.0
+    pip = SOURCES[source].pip_size(sym) or 0.0001
+    return ss.fx_comm / 100, (FX_SPREAD.get(sym, ss.spread) / 2 + ss.fx_slip) * pip
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_funding(sym):
+    return X.funding_series(sym)
+
+
+def make_cache(dfc, cfg, sym, tf_):
+    """Indicator cache + holding costs (funding / swap) as set for this search. Returns (cache, carry info)."""
+    cc = E.Cache(dfc)
+    car = (cfg or {}).get("carry") or {}
+    info = None
+    if car.get("kind") == "funding":
+        try:
+            s_, note = get_funding(sym)
+        except Exception as e:
+            s_, note = pd.Series(dtype=float), f"gagal mengambil funding ({e}); dipakai tarif dasar 0,01%/8 jam"
+        cc.carry_long, cc.carry_short, info = X.funding_carry(cc, tf_, s_, note)
+    elif car.get("kind") == "swap":
+        cc.carry_long, cc.carry_short = X.swap_carry(cc, car["long"], car["short"])
+    return cc, info
+
+
+def carry_cfg():
+    if ss.source == "binance" and ss.use_funding:
+        return dict(kind="funding")
+    if ss.source != "binance" and ss.use_swap:
+        return dict(kind="swap", long=float(ss.swap_long), short=float(ss.swap_short))
+    return None
+
+
 # ------------------------------------------------------------------ charts
 def candle_fig(df, fam=None, p=None, tr=None, cc=None, start_i=None, height=620, split_time=None):
     sub = df
-    fig = make_subplots(rows=2 if fam in ("rsi_mr", "macd") else 1, cols=1, shared_xaxes=True,
-                        row_heights=[0.75, 0.25] if fam in ("rsi_mr", "macd") else [1.0], vertical_spacing=0.03)
+    two = fam in ("rsi_mr", "macd", "stochrsi", "zscore")
+    fig = make_subplots(rows=2 if two else 1, cols=1, shared_xaxes=True,
+                        row_heights=[0.75, 0.25] if two else [1.0], vertical_spacing=0.03)
     x = to_wib(sub.index)
     fig.add_trace(go.Candlestick(x=x, open=sub.open, high=sub.high, low=sub.low, close=sub.close, name="Harga",
                                  increasing_line_color="#26a69a", decreasing_line_color="#ef5350"), row=1, col=1)
@@ -144,6 +186,16 @@ def candle_fig(df, fam=None, p=None, tr=None, cc=None, start_i=None, height=620,
                 fig.add_trace(go.Scatter(x=x, y=a, name="MACD", line=dict(color="#2962ff")), row=2, col=1)
             elif name == "_macd_signal":
                 fig.add_trace(go.Scatter(x=x, y=a, name="Signal", line=dict(color="#ff6d00")), row=2, col=1)
+            elif name == "_stoch":
+                fig.add_trace(go.Scatter(x=x, y=a, name="Stoch RSI %K", line=dict(color="#7e57c2")), row=2, col=1)
+                for lv in (p["k_lo"], p["k_hi"]):
+                    fig.add_hline(y=lv, line_dash="dot", line_color="gray", row=2, col=1)
+            elif name == "_z":
+                fig.add_trace(go.Scatter(x=x, y=a, name="Z-score", line=dict(color="#7e57c2")), row=2, col=1)
+                for lv in (-p["z_entry"], p["z_entry"]):
+                    fig.add_hline(y=lv, line_dash="dot", line_color="gray", row=2, col=1)
+            elif name == "_adx":
+                continue
             else:
                 fig.add_trace(go.Scatter(x=x, y=a, name=name, line=dict(width=1.3)), row=1, col=1)
         if tr is not None and len(tr["ent"]):
@@ -183,7 +235,8 @@ def selected_strategy():
 # ------------------------------------------------------------------ tabs
 st.title("📈 Backtest Lab")
 st.caption(f"{symbol} · {tf} · sumber: {src.label} · waktu ditampilkan dalam WIB (UTC+7)")
-t_live, t_search, t_res, t_help = st.tabs(["📈 Chart Live", "🔬 Cari Strategi", "📊 Hasil & Detail", "📘 Panduan"])
+t_live, t_search, t_res, t_wfo, t_port, t_cmp, t_help = st.tabs(
+    ["📈 Chart Live", "🔬 Cari Strategi", "📊 Hasil & Detail", "🔁 Walk-forward", "🧺 Portofolio", "💾 Simpan & Bandingkan", "📘 Panduan"])
 
 with t_live:
     nbars = st.select_slider("Jumlah candle di chart", [200, 500, 1000, 2000], value=500)
@@ -221,7 +274,7 @@ with t_live:
         if sel and sel[1]["symbol"] == symbol and sel[1]["tf"] == tf:
             o, res = sel
             dfc = df.copy()
-            cc = E.Cache(dfc)
+            cc, _ = make_cache(dfc, res["cfg"], symbol, tf)
             cf, ca, _ = cost_params(float(dfc.close.iloc[-1]))
             _, tr = E.run(o["fam"], o["params"], cc, min(260, len(dfc) // 4), len(dfc), res["cfg"]["direction"], cf, ca,
                           lev=res["cfg"]["lev"])
@@ -281,7 +334,19 @@ with t_search:
         st.number_input("Ukuran posisi (x modal, 1 = tanpa leverage)", 0.1, 20.0, step=0.5, key="lev")
         st.slider("Minimal parameter tetangga yang tetap untung (%)", 0, 100, key="min_stab",
                   help="Kalau EMA 11/36 bagus tapi 12/35 hancur, berarti cuma kebetulan.")
+        if ss.source == "binance":
+            st.checkbox("Hitung funding rate (seperti trading perpetual futures)", key="use_funding",
+                        help="Biaya/pendapatan tiap 8 jam dari riwayat funding Binance. Long bayar kalau funding positif, short menerima.")
+        else:
+            st.checkbox("Hitung swap (biaya menginap)", key="use_swap",
+                        help="Perkiraan swap broker per tahun, dihitung sesuai lama posisi dibuka (termasuk akhir pekan).")
+            if ss.use_swap:
+                s1, s2 = st.columns(2)
+                s1.number_input("Swap Long (%/tahun, + = bayar)", -20.0, 20.0, step=0.25, key="swap_long")
+                s2.number_input("Swap Short (%/tahun, + = bayar)", -20.0, 20.0, step=0.25, key="swap_short")
+                st.caption("Lihat angka swap di spesifikasi kontrak brokermu. Contoh: kalau broker memotong 2% setahun untuk Long, isi 2.")
     st.multiselect("Jenis strategi yang dicari", list(E.FAMILIES), key="families", format_func=lambda k: E.FAMILIES[k]["name"])
+    st.caption("Filter kondisi pasar (ADX: hanya saat trending / hanya saat sideways / tanpa filter) ikut dicoba otomatis di semua jenis.")
     d1, d2 = st.columns(2)
     d1.select_slider("Jumlah variasi yang dicoba", [500, 1000, 2000, 3000, 5000, 10000, 20000], key="n_variants")
     d2.select_slider("Batas waktu (detik)", [30, 60, 120, 300, 600], key="time_budget")
@@ -298,13 +363,18 @@ with t_search:
                            direction=ss.direction, oos_pct=ss.oos_pct, folds=ss.folds, cost_frac=cf, cost_abs=ca,
                            min_pf=ss.min_pf, min_wr=ss.min_wr / 100, max_dd=ss.max_dd / 100, min_trades=ss.min_trades,
                            min_wf=ss.min_wf / 100, min_stab=ss.min_stab / 100, oos_min_pf=ss.oos_min_pf,
-                           lev=ss.lev, seed=int(time.time()) % 100000, pine_cost=pine_cost)
-                bar = st.progress(0.0, text="Mencari...")
+                           lev=ss.lev, seed=int(time.time()) % 100000, pine_cost=pine_cost, carry=carry_cfg())
+                bar = st.progress(0.0, text="Menyiapkan data...")
+                cc0, carry_info = make_cache(dfc, cfg, symbol, tf)
                 def prog(f, tested, npass):
                     bar.progress(min(f, 1.0), text=f"Diuji {tested:,} variasi · lolos target in-sample: {npass}")
-                out, meta, _ = E.search(dfc, cfg, prog)
+                out, meta, cc0 = E.search(dfc, cfg, prog, cc=cc0)
+                bar.progress(1.0, text="Menghitung Deflated Sharpe dan peluang overfit (PBO)...")
+                res_new = dict(out=out, meta=meta, cfg=cfg, symbol=symbol, tf=tf, source=ss.source, id=f"{time.time():.3f}",
+                               start=str(start_date), carry_info=carry_info)
+                U.after_search(res_new, cc0)
                 bar.progress(1.0, text=f"Selesai: {meta['tested']:,} variasi diuji dalam {meta['seconds']:.1f} detik")
-                ss.res = dict(out=out, meta=meta, cfg=cfg, symbol=symbol, tf=tf, source=ss.source)
+                ss.res = res_new
                 ss.sel = None
                 npass = sum(o["passed"] for o in out)
                 st.success(f"{meta['tested']:,} variasi diuji. {meta['is_pass']} lolos target di data in-sample, "
@@ -332,17 +402,23 @@ with t_res:
                          "OOS Net %": om["net"] * 100, "OOS PF": om["pf"], "OOS WR %": om["winrate"] * 100,
                          "OOS DD %": om["maxdd"] * 100, "OOS Trades": om["trades"],
                          "Walk-fwd %": o["wf"] * 100, "Stabil %": o["stab"] * 100,
+                         "DSR %": (o.get("dsr") if o.get("dsr") == o.get("dsr") and o.get("dsr") is not None else 0) * 100,
                          "Deskripsi": E.describe(o["fam"], o["params"], cfg["direction"])})
         tbl = pd.DataFrame(rows)
         only = st.checkbox("Tampilkan hanya yang lolos semua tes", value=False)
         if only:
             tbl = tbl[tbl.Status.str.startswith("✅")]
         tbl = tbl.sort_values(["Status", "IS Net %"], ascending=[True, False], key=lambda s: s.map({"✅ Lolos semua": 0}).fillna(1) if s.name == "Status" else s)
-        st.caption("Urutan berdasarkan hasil in-sample (data unseen hanya dipakai sebagai ujian, bukan untuk memilih). Klik satu baris untuk melihat detail.")
+        st.caption("Urutan berdasarkan hasil in-sample (data unseen hanya dipakai sebagai ujian, bukan untuk memilih). Klik satu baris untuk melihat detail. "
+                   "DSR % = peluang hasil in-sample bukan kebetulan setelah dikoreksi jumlah variasi yang dicoba.")
+        pbo = res.get("search_tests", {}).get("pbo")
+        if pbo:
+            lvl = "rendah (bagus)" if pbo["pbo"] < 0.2 else "sedang" if pbo["pbo"] <= 0.5 else "tinggi (hati-hati)"
+            st.caption(f"Peluang overfit seluruh pencarian ini (PBO, metode CSCV): **{pbo['pbo'] * 100:.0f}%**, {lvl}.")
         ev = st.dataframe(tbl.drop(columns=["idx"]), hide_index=True, width='stretch', on_select="rerun",
                           selection_mode="single-row", height=330,
                           column_config={k: st.column_config.NumberColumn(format="%.2f") for k in
-                                         ["IS Net %", "IS PF", "IS WR %", "IS DD %", "OOS Net %", "OOS PF", "OOS WR %", "OOS DD %", "Walk-fwd %", "Stabil %"]})
+                                         ["IS Net %", "IS PF", "IS WR %", "IS DD %", "OOS Net %", "OOS PF", "OOS WR %", "OOS DD %", "Walk-fwd %", "Stabil %", "DSR %"]})
         if ev.selection.rows:
             ss.sel = int(tbl.iloc[ev.selection.rows[0]]["idx"])
         if ss.get("sel") is None and len(tbl):
@@ -361,7 +437,7 @@ with t_res:
             if dfc is None:
                 st.warning(f"Pilih lagi {res['symbol']} {res['tf']} di sidebar untuk melihat detail strategi ini.")
                 st.stop()
-            cc = E.Cache(dfc)
+            cc, carry_info = make_cache(dfc, cfg, res["symbol"], res["tf"])
             n = len(dfc)
             split = int(np.searchsorted(dfc.index.values, np.datetime64(meta["split_time"].tz_convert(None))))
             is_start = min(260, split // 4)
@@ -379,7 +455,22 @@ with t_res:
                        f"(median PF tetangga {o['stab_pf']:.2f}) · biaya dihitung · posisi {lev:g}x modal · "
                        "OOS di atas sudah termasuk candle baru sejak pencarian.")
 
-            d_chart, d_perf, d_trades, d_sim, d_exp = st.tabs(["Chart", "Performance", "Trades", "Simulation (Monte Carlo)", "Export Pine Script"])
+            ctx = dict(o=o, res=res, cfg=cfg, cc=cc, dfc=dfc, n=n, split=split, is_start=is_start, skey=f"{res.get('id', '0')}_{ss.sel}",
+                       carry_info=carry_info or res.get("carry_info"), symbols=SOURCES[res["source"]].symbols(),
+                       cc_nocarry=E.Cache(dfc) if cfg.get("carry") else cc,
+                       load_symbol_raw=lambda s_: closed_only(SOURCES[res["source"]].get(s_, res["tf"], start=pd.Timestamp(start_date, tz="UTC"),
+                                                                                      refresh=True), res["tf"]),
+                       make_cache=lambda d_, s_: make_cache(d_, cfg if res["source"] == "binance" else None, s_, res["tf"])[0],
+                       cost_for=lambda s_, px: cost_for(res["source"], s_, px))
+            U.render_report(ctx)
+            d_chart, d_perf, d_trades, d_sim, d_rob, d_bask, d_real, d_exp = st.tabs(
+                ["Chart", "Performance", "Trades", "Simulation (Monte Carlo)", "🧪 Uji ketahanan", "🌍 Multi-aset", "🎯 Realisme", "Export & Simpan"])
+            with d_rob:
+                U.render_robust(ctx)
+            with d_bask:
+                U.render_basket(ctx)
+            with d_real:
+                U.render_realism(ctx)
             with d_chart:
                 rng = st.select_slider("Candle terakhir yang ditampilkan", [300, 1000, 2000, 4000], value=1000)
                 sub = dfc.iloc[-rng:]
@@ -420,8 +511,9 @@ with t_res:
             with d_sim:
                 mcol1, mcol2 = st.columns(2)
                 runs = mcol1.select_slider("Jumlah simulasi", [200, 500, 1000, 2000, 5000], value=1000)
-                method = mcol2.radio("Metode", ["bootstrap", "shuffle"], horizontal=True,
-                                     format_func={"bootstrap": "Bootstrap (ambil acak dengan pengembalian)", "shuffle": "Acak urutan trade"}.get)
+                method = mcol2.radio("Metode", ["bootstrap", "shuffle", "skip"], horizontal=True,
+                                     format_func={"bootstrap": "Bootstrap (ambil acak dengan pengembalian)", "shuffle": "Acak urutan trade",
+                                                  "skip": "Lewatkan 10% trade secara acak"}.get)
                 mc = E.monte_carlo(ftr["ret"], runs, method)
                 if mc is None:
                     st.info("Trade terlalu sedikit untuk simulasi.")
@@ -447,21 +539,64 @@ with t_res:
                 note = (f"Hasil uji di aplikasi: in-sample PF {im['pf']:.2f}, DD {im['maxdd']*100:.1f}%; unseen PF {om['pf']:.2f}, "
                         f"DD {om['maxdd']*100:.1f}%, {om['trades']} trade.")
                 tv_sym = res["symbol"].split(" ")[0]
+                tt = U.tests_for(ctx["skey"])
+                g = tt.get("grade", (None, "-"))
+                trows = [("Aset", f"{res['symbol']} {res['tf']}"), ("IS PF / DD", f"{im['pf']:.2f} / {im['maxdd']*100:.1f}%"),
+                         ("Unseen PF / DD", f"{om['pf']:.2f} / {om['maxdd']*100:.1f}%"), ("Unseen trades", str(om["trades"])),
+                         ("DSR", U.pct(tt.get("dsr", {}).get("dsr"), 0)),
+                         ("Rapor", f"{g[1]} ({g[0]:.0f}/100)" if g[0] is not None else "-")]
                 strat, indi = to_pine(o["fam"], o["params"], cfg["direction"], f"{E.FAMILIES[o['fam']]['name']} #{ss.sel+1}",
-                                      tv_sym, res["tf"], cfg["pine_cost"], lev, note)
+                                      tv_sym, res["tf"], cfg["pine_cost"], lev, note, trows)
                 st.markdown("**Cara pakai:** buka TradingView → Pine Editor → tempel kode → *Add to chart*. "
                             "Versi **strategy** menampilkan hasil backtest TradingView; versi **indicator** hanya label Long/Short/Exit "
                             "dan bisa dipasang alert.")
                 e1, e2 = st.columns(2)
                 e1.download_button("⬇️ Pine strategy (.pine)", strat, f"strategy_{tv_sym}_{res['tf']}.pine", width='stretch')
                 e2.download_button("⬇️ Pine indicator (.pine)", indi, f"indicator_{tv_sym}_{res['tf']}.pine", width='stretch')
-                st.download_button("⬇️ Pengaturan strategi (JSON)", json.dumps(dict(family=o["fam"], params=o["params"], direction=cfg["direction"],
-                                   symbol=res["symbol"], tf=res["tf"], source=res["source"], in_sample=im, oos=om), indent=2, default=float),
-                                   f"strategy_{tv_sym}_{res['tf']}.json")
+                sj = U.strategy_json(o, res, tt)
+                j1, j2 = st.columns(2)
+                j1.download_button("💾 Simpan strategi (JSON)", sj, f"strategy_{tv_sym}_{res['tf']}_{o['fam']}_{ss.sel+1}.json", width='stretch',
+                                   help="Simpan file ini di HP/laptop. Bisa di-upload lagi di tab 'Simpan & Bandingkan'.")
+                if j2.button("➕ Tambah ke perbandingan", width='stretch'):
+                    ss.setdefault("compare", {})[f"{tv_sym} {res['tf']} {E.FAMILIES[o['fam']]['name']} #{ss.sel+1}"] = json.loads(sj)
+                    st.success("Ditambahkan. Buka tab 'Simpan & Bandingkan'.")
+                st.caption("Pine sekarang juga punya tabel statistik di pojok chart dan alert untuk sinyal, stop loss, take profit dan posisi baru.")
                 with st.expander("Lihat kode Pine strategy"):
                     st.code(strat, language="javascript")
                 with st.expander("Lihat kode Pine indicator"):
                     st.code(indi, language="javascript")
+
+def _res_data():
+    res = ss.get("res")
+    if not res:
+        st.info("Jalankan pencarian di tab 'Cari Strategi' dulu.")
+        return None
+    if res["symbol"] != symbol or res["tf"] != tf:
+        st.warning(f"Pilih lagi {res['symbol']} {res['tf']} di sidebar untuk halaman ini.")
+        return None
+    df = get_data(show=False)
+    if df is None:
+        return None
+    dfc = closed_only(df, res["tf"])
+    cc, _ = make_cache(dfc, res["cfg"], res["symbol"], res["tf"])
+    return res, dfc, cc
+
+
+with t_wfo:
+    got = _res_data()
+    if got:
+        U.render_wfo(*got)
+
+with t_port:
+    got = _res_data()
+    if got:
+        U.render_portfolio(*got)
+
+with t_cmp:
+    def _load_any(source, sym, tf_, start):
+        st_ = pd.Timestamp(start).date() if start else start_date
+        return closed_only(load(source, sym, tf_, st_), tf_)
+    U.render_compare(_load_any, cost_for, make_cache)
 
 with t_help:
     st.markdown(open("README_ID.md", encoding="utf-8").read() if __import__("os").path.exists("README_ID.md") else "")
