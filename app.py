@@ -36,13 +36,20 @@ st.set_page_config(page_title="Backtest Lab", page_icon="📈", layout="wide")
 TZ = "Asia/Jakarta"
 FX_SPREAD = {"EURUSD": 1.0, "GBPUSD": 1.5, "USDJPY": 1.2, "AUDUSD": 1.2, "USDCAD": 1.8, "USDCHF": 1.5,
              "NZDUSD": 1.8, "XAUUSD (Gold futures GC=F)": 3.0, "XAUUSD": 3.0, "XAGUSD": 2.5, "EURJPY": 1.5,
-             "GBPJPY": 2.5, "EURGBP": 1.2}
+             "GBPJPY": 2.5, "EURGBP": 1.2, "EURAUD": 2.0, "EURCAD": 2.2, "EURCHF": 1.8, "EURNZD": 3.0, "GBPAUD": 2.8,
+             "GBPCAD": 3.0, "GBPCHF": 2.8, "GBPNZD": 4.0, "AUDJPY": 1.8, "AUDCAD": 2.0, "AUDCHF": 2.0, "AUDNZD": 2.5,
+             "CADJPY": 2.0, "CHFJPY": 2.5, "NZDJPY": 2.2, "NZDCAD": 2.5, "CADCHF": 2.5,
+             # indices / oil: spread in points (SPX500 in 0.1 points, oil in cents)
+             "US30": 2.5, "NAS100": 1.5, "SPX500": 5.0, "GER40": 1.5, "UK100": 1.5, "JPN225": 10.0, "WTI": 3.0, "BRENT": 3.0}
+# how far back small timeframes may go (keeps memory/time sane on the free cloud)
+MAX_DAYS = {"binance": {"1m": 120, "3m": 365, "5m": 1095, "15m": 2190},
+            "dukascopy": {"1m": 120, "5m": 1095, "15m": 2190, "30m": 3650}}
 DIR_LABEL = {"both": "Long & Short", "long": "Hanya Long", "short": "Hanya Short"}
 
 ss = st.session_state
 defaults = dict(source="binance", symbol="BTCUSDT", tf="1h", direction="both", oos_pct=30, folds=4,
                 min_pf=1.3, min_wr=0.0, max_dd=30.0, min_trades=50, families=list(E.FAMILIES),
-                n_variants=3000, time_budget=120, min_wf=60, min_stab=60, oos_min_pf=1.1, lev=1.0,
+                n_variants=3000, time_budget=120, mode="ketat", algo="random", combo=False, min_wf=60, min_stab=60, oos_min_pf=1.1, lev=1.0,
                 fee=0.10, slip=0.05, spread=1.0, fx_comm=0.0, fx_slip=0.2, refresh=15, prompt="",
                 use_funding=False, use_swap=False, swap_long=2.0, swap_short=-0.5)
 for k, v in defaults.items():
@@ -96,6 +103,10 @@ with st.sidebar:
     first = dt.date(2017, 8, 17) if ss.source == "binance" else dt.date(2003, 5, 5)
     start_default = (dt.date.today() - dt.timedelta(days=default_start)) if default_start else first
     start_date = st.date_input("Data mulai dari", value=start_default, min_value=dt.date(2000, 1, 1))
+    _cap = MAX_DAYS.get(ss.source, {}).get(tf)
+    if _cap and start_date < dt.date.today() - dt.timedelta(days=_cap):
+        start_date = dt.date.today() - dt.timedelta(days=_cap)
+        st.caption(f"Timeframe {tf} dibatasi {_cap} hari terakhir (mulai {start_date:%d %b %Y}) supaya tidak kehabisan memori.")
     st.slider("Auto-refresh chart (detik)", 5, 120, key="refresh")
     st.caption("Aplikasi pribadi, non-komersial. Backtest bukan jaminan hasil.")
 
@@ -165,9 +176,11 @@ def carry_cfg():
 
 
 # ------------------------------------------------------------------ charts
+SUB_PANEL = {"_rsi": ("RSI", ("lower", "upper", "exit_level")), "_cci": ("CCI", ()), "_wr": ("Williams %R", ("wr_lo", "wr_hi")),
+             "_mfi": ("MFI", ("mfi_lo", "mfi_hi")), "_sqz": ("Squeeze momentum", ())}
 def candle_fig(df, fam=None, p=None, tr=None, cc=None, start_i=None, height=620, split_time=None):
     sub = df
-    two = fam in ("rsi_mr", "macd", "stochrsi", "zscore")
+    two = fam is not None and bool(E.FAMILIES[fam].get("sub"))
     fig = make_subplots(rows=2 if two else 1, cols=1, shared_xaxes=True,
                         row_heights=[0.75, 0.25] if two else [1.0], vertical_spacing=0.03)
     x = to_wib(sub.index)
@@ -178,10 +191,15 @@ def candle_fig(df, fam=None, p=None, tr=None, cc=None, start_i=None, height=620,
         off = len(cc.c) - len(sub)
         for name, arr in lines.items():
             a = arr[off:]
-            if name == "_rsi":
-                fig.add_trace(go.Scatter(x=x, y=a, name="RSI", line=dict(color="#7e57c2")), row=2, col=1)
-                for lv in (p["lower"], p["upper"]):
-                    fig.add_hline(y=lv, line_dash="dot", line_color="gray", row=2, col=1)
+            if name in SUB_PANEL:
+                lab, lv_keys = SUB_PANEL[name]
+                fig.add_trace(go.Scatter(x=x, y=a, name=lab, line=dict(color="#7e57c2")), row=2, col=1)
+                for k_ in lv_keys:
+                    if k_ in p:
+                        fig.add_hline(y=p[k_], line_dash="dot", line_color="gray", row=2, col=1)
+                if name == "_cci" and "cci_lvl" in p:
+                    for lv in (-p["cci_lvl"], p["cci_lvl"]):
+                        fig.add_hline(y=lv, line_dash="dot", line_color="gray", row=2, col=1)
             elif name == "_macd":
                 fig.add_trace(go.Scatter(x=x, y=a, name="MACD", line=dict(color="#2962ff")), row=2, col=1)
             elif name == "_macd_signal":
@@ -210,7 +228,7 @@ def candle_fig(df, fam=None, p=None, tr=None, cc=None, start_i=None, height=620,
                                              marker=dict(symbol=sym, size=12, color=col)), row=1, col=1)
             m = (ex >= 0)
             if m.any():
-                reason = np.array(["Exit", "SL", "TP", "Akhir"])[tr["reason"][m]]
+                reason = np.array(["Exit", "SL", "TP", "Akhir", "Waktu"])[tr["reason"][m]]
                 txt = [f"{r} {v*100:+.2f}%" for r, v in zip(reason, tr["ret"][m])]
                 fig.add_trace(go.Scatter(x=to_wib(idx[ex[m]]), y=tr["xp"][m], mode="markers+text", name="Exit",
                                          text=txt, textposition="top center", textfont=dict(size=10),
@@ -235,8 +253,9 @@ def selected_strategy():
 # ------------------------------------------------------------------ tabs
 st.title("📈 Backtest Lab")
 st.caption(f"{symbol} · {tf} · sumber: {src.label} · waktu ditampilkan dalam WIB (UTC+7)")
-t_live, t_search, t_res, t_wfo, t_port, t_cmp, t_help = st.tabs(
-    ["📈 Chart Live", "🔬 Cari Strategi", "📊 Hasil & Detail", "🔁 Walk-forward", "🧺 Portofolio", "💾 Simpan & Bandingkan", "📘 Panduan"])
+t_live, t_search, t_scan, t_res, t_wfo, t_port, t_cmp, t_help = st.tabs(
+    ["📈 Chart Live", "🔬 Cari Strategi", "🛰️ Scan banyak pasar", "📊 Hasil & Detail", "🔁 Walk-forward", "🧺 Portofolio",
+     "💾 Simpan & Bandingkan", "📘 Panduan"])
 
 with t_live:
     nbars = st.select_slider("Jumlah candle di chart", [200, 500, 1000, 2000], value=500)
@@ -346,7 +365,25 @@ with t_search:
                 s2.number_input("Swap Short (%/tahun, + = bayar)", -20.0, 20.0, step=0.25, key="swap_short")
                 st.caption("Lihat angka swap di spesifikasi kontrak brokermu. Contoh: kalau broker memotong 2% setahun untuk Long, isi 2.")
     st.multiselect("Jenis strategi yang dicari", list(E.FAMILIES), key="families", format_func=lambda k: E.FAMILIES[k]["name"])
-    st.caption("Filter kondisi pasar (ADX: hanya saat trending / hanya saat sideways / tanpa filter) ikut dicoba otomatis di semua jenis.")
+    bad_tf = [E.FAMILIES[f]["name"] for f in ss.families if E.FAMILIES[f]["intraday"] and TF_MINUTES.get(tf, 60) > 60]
+    if bad_tf:
+        st.caption(f"Dilewati di timeframe ini (butuh timeframe ≤ 1 jam): {', '.join(bad_tf)}.")
+    st.caption("Exit ikut dicoba otomatis: stop loss ATR atau %, take profit, ambil untung 50% (TP1), stop ke harga masuk (breakeven), "
+               "trailing ATR / chandelier, keluar setelah N candle, keluar saat sinyal kebalikan. Filter ADX juga ikut dicoba.")
+    m1, m2 = st.columns(2)
+    m1.radio("Mode penilaian", ["ketat", "vela"], key="mode", horizontal=True,
+             format_func=lambda k: {"ketat": "Ketat (disarankan)", "vela": "Mode Vela (longgar)"}[k],
+             help="Ketat: harus lolos data unseen + walk-forward + stabilitas parameter + tidak overfit. "
+                  "Vela: cukup lolos target di data lama dan data unseen.")
+    m2.radio("Cara mencari", ["random", "evo"], key="algo", horizontal=True,
+             format_func=lambda k: {"random": "Acak", "evo": "Evolusi (lebih cepat ketemu)"}[k],
+             help="Evolusi: setelah 25% percobaan acak, variasi yang bagus di data lama diubah sedikit-sedikit. "
+                  "Data unseen tidak pernah dipakai untuk memilih. Semua percobaan tetap dihitung di Deflated Sharpe.")
+    st.checkbox("Kombinasi dengan filter konfirmasi (sesi, hari, tren timeframe besar, volatilitas, RSI, volume)", key="combo",
+                help="Sinyal masuk hanya diambil kalau filter konfirmasi juga setuju. Lebih banyak kombinasi = peluang kebetulan juga naik.")
+    if ss.mode == "vela":
+        st.warning("Mode Vela: hasil 'lolos' lebih mungkin cuma kebetulan (tanpa cek walk-forward & stabilitas). "
+                   "Lihat kolom DSR % dan nilai (grade) sebelum percaya.")
     d1, d2 = st.columns(2)
     d1.select_slider("Jumlah variasi yang dicoba", [500, 1000, 2000, 3000, 5000, 10000, 20000], key="n_variants")
     d2.select_slider("Batas waktu (detik)", [30, 60, 120, 300, 600], key="time_budget")
@@ -363,12 +400,17 @@ with t_search:
                            direction=ss.direction, oos_pct=ss.oos_pct, folds=ss.folds, cost_frac=cf, cost_abs=ca,
                            min_pf=ss.min_pf, min_wr=ss.min_wr / 100, max_dd=ss.max_dd / 100, min_trades=ss.min_trades,
                            min_wf=ss.min_wf / 100, min_stab=ss.min_stab / 100, oos_min_pf=ss.oos_min_pf,
-                           lev=ss.lev, seed=int(time.time()) % 100000, pine_cost=pine_cost, carry=carry_cfg())
+                           lev=ss.lev, seed=int(time.time()) % 100000, pine_cost=pine_cost, carry=carry_cfg(),
+                           mode=ss.mode, algo=ss.algo, combo=bool(ss.combo), tf_min=TF_MINUTES.get(tf, 60))
                 bar = st.progress(0.0, text="Menyiapkan data...")
                 cc0, carry_info = make_cache(dfc, cfg, symbol, tf)
                 def prog(f, tested, npass):
                     bar.progress(min(f, 1.0), text=f"Diuji {tested:,} variasi · lolos target in-sample: {npass}")
-                out, meta, cc0 = E.search(dfc, cfg, prog, cc=cc0)
+                try:
+                    out, meta, cc0 = E.search(dfc, cfg, prog, cc=cc0)
+                except ValueError as e:
+                    st.error(str(e))
+                    st.stop()
                 bar.progress(1.0, text="Menghitung Deflated Sharpe dan peluang overfit (PBO)...")
                 res_new = dict(out=out, meta=meta, cfg=cfg, symbol=symbol, tf=tf, source=ss.source, id=f"{time.time():.3f}",
                                start=str(start_date), carry_info=carry_info)
@@ -377,11 +419,67 @@ with t_search:
                 ss.res = res_new
                 ss.sel = None
                 npass = sum(o["passed"] for o in out)
+                tests_txt = "unseen, walk-forward, stabilitas" if cfg["mode"] == "ketat" else "data unseen saja (mode Vela)"
                 st.success(f"{meta['tested']:,} variasi diuji. {meta['is_pass']} lolos target di data in-sample, "
-                           f"{npass} lolos SEMUA tes (unseen, walk-forward, stabilitas). Lihat tab 'Hasil & Detail'.")
+                           f"{npass} lolos tes ({tests_txt}). Lihat tab 'Hasil & Detail'.")
                 if npass == 0:
                     st.info("Tidak ada yang lolos semua tes. Ini jujur: berarti target terlalu ketat atau pasar ini sulit. "
                             "Coba longgarkan target, ganti timeframe, atau tambah jenis strategi.")
+
+def _open_scan(key):
+    r = ss.scan_results[key]
+    ss.res = r
+    ss.sel = None
+    ss.source, ss.symbol, ss.tf = r["source"], r["symbol"], r["tf"]
+    ss.open_msg = f"{r['symbol']} {r['tf']} dibuka. Lihat tab 'Hasil & Detail'."
+
+
+with t_scan:
+    st.markdown("Cari strategi di **banyak pasar & timeframe sekaligus** dengan pengaturan yang sama seperti tab 'Cari Strategi' "
+                "(target, mode, cara mencari, jenis strategi, biaya). Hasilnya diurutkan dalam satu tabel.")
+    sc1, sc2 = st.columns(2)
+    scan_src = sc1.selectbox("Sumber", ["binance", "dukascopy"], format_func=lambda k: SOURCES[k].label, key="scan_src")
+    all_syms = SOURCES[scan_src].symbols()
+    dflt = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"] if scan_src == "binance" else ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "US30", "NAS100"]
+    scan_syms = sc1.multiselect("Pasar", all_syms, default=[x for x in dflt if x in all_syms], key=f"scan_syms_{scan_src}")
+    scan_tfs = sc2.multiselect("Timeframe", ["5m", "15m", "30m", "1h", "4h", "1d"], default=["1h", "4h"], key="scan_tfs")
+    sc3, sc4 = st.columns(2)
+    scan_var = sc3.select_slider("Variasi per pasar", [300, 500, 1000, 2000, 3000], value=1000, key="scan_var")
+    scan_time = sc4.select_slider("Batas waktu total (detik)", [60, 120, 300, 600, 900], value=300, key="scan_time")
+    n_jobs = len(scan_syms) * len(scan_tfs)
+    st.caption(f"{n_jobs} kombinasi pasar × timeframe. Riwayat yang dipakai: 5m 180 hari, 15m 1 tahun, 30m 2 tahun, 1h 4 tahun, "
+               "4h 8 tahun, 1d semua. Unduhan pertama tiap pasar butuh waktu; di server gratis pilih sedikit pasar dulu.")
+    if ss.mode == "vela":
+        st.warning("Mode Vela aktif: makin banyak pasar dicoba, makin besar peluang ada yang 'lolos' karena kebetulan.")
+    if st.button("🛰️ Mulai scan", type="primary", disabled=n_jobs == 0):
+        base = dict(families=ss.families or list(E.FAMILIES), n_variants=int(scan_var), direction=ss.direction, oos_pct=ss.oos_pct,
+                    folds=ss.folds, min_pf=ss.min_pf, min_wr=ss.min_wr / 100, max_dd=ss.max_dd / 100, min_trades=ss.min_trades,
+                    min_wf=ss.min_wf / 100, min_stab=ss.min_stab / 100, oos_min_pf=ss.oos_min_pf, lev=ss.lev,
+                    seed=int(time.time()) % 100000, carry=None, mode=ss.mode, algo=ss.algo, combo=bool(ss.combo), pbo_trials=400)
+        jobs = [(scan_src, s_, t_) for s_ in scan_syms for t_ in scan_tfs]
+        bar = st.progress(0.0, text="Mulai...")
+        from core.scan import scan_markets
+        rows, results = scan_markets(
+            jobs, lambda s0, s1, s2, st_: SOURCES[s0].get(s1, s2, start=st_, refresh=True), base,
+            lambda s0, s1, px: cost_for(s0, s1, px), float(scan_time),
+            progress=lambda f, txt: bar.progress(min(f, 1.0), text=txt))
+        ss.scan_rows, ss.scan_results = rows, results
+    if ss.get("scan_rows"):
+        tbl = pd.DataFrame(ss.scan_rows)
+        show = [c for c in ["Pasar", "TF", "Status", "Lolos tes", "Lolos IS", "Diuji", "Strategi terbaik", "IS PF", "OOS PF", "OOS Net %",
+                            "OOS DD %", "OOS Trades", "DSR %", "PBO %", "Candle", "Detik"] if c in tbl]
+        st.dataframe(tbl[show], hide_index=True, width='stretch',
+                     column_config={k: st.column_config.NumberColumn(format="%.2f") for k in ["IS PF", "OOS PF", "OOS Net %", "OOS DD %", "DSR %", "PBO %"]})
+        st.caption("Urutan: yang punya strategi lolos dulu, lalu DSR (peluang bukan kebetulan) tertinggi, lalu PF data unseen. "
+                   "'Strategi terbaik' = yang DSR-nya paling tinggi di antara yang lolos. Ini hasil uji data lama, bukan saran.")
+        st.download_button("⬇️ Unduh tabel (CSV)", tbl[show].to_csv(index=False).encode("utf-8"), "scan_pasar.csv", "text/csv")
+        keys = [r["key"] for r in ss.scan_rows if r.get("key")]
+        if keys:
+            o1, o2 = st.columns([3, 1])
+            pick = o1.selectbox("Buka hasil pasar", keys, format_func=lambda k: " ".join(k.split("|")[1:]), key="scan_pick")
+            o2.button("Buka di 'Hasil & Detail'", on_click=_open_scan, args=(pick,), width='stretch')
+            if ss.get("open_msg"):
+                st.success(ss.open_msg)
 
 with t_res:
     res = ss.get("res")
@@ -395,7 +493,7 @@ with t_res:
         rows = []
         for i, o in enumerate(res["out"]):
             im, om = o["is_m"], o["oos_m"]
-            status = "✅ Lolos semua" if o["passed"] else ("⚠️ Overfit" if o["overfit"] else ("➖ Hampir (gagal target IS)" if not o["is_pass"] else "❌ Gagal tes"))
+            status = ("✅ Lolos semua" if cfg.get("mode", "ketat") == "ketat" else "✅ Lolos (mode Vela)") if o["passed"] else ("⚠️ Overfit" if o["overfit"] else ("➖ Hampir (gagal target IS)" if not o["is_pass"] else "❌ Gagal tes"))
             rows.append({"idx": i, "Status": status, "Nama": f"{E.FAMILIES[o['fam']]['name']} #{i+1}",
                          "IS Net %": im["net"] * 100, "IS PF": im["pf"], "IS WR %": im["winrate"] * 100,
                          "IS DD %": im["maxdd"] * 100, "IS Trades": im["trades"],
@@ -408,7 +506,7 @@ with t_res:
         only = st.checkbox("Tampilkan hanya yang lolos semua tes", value=False)
         if only:
             tbl = tbl[tbl.Status.str.startswith("✅")]
-        tbl = tbl.sort_values(["Status", "IS Net %"], ascending=[True, False], key=lambda s: s.map({"✅ Lolos semua": 0}).fillna(1) if s.name == "Status" else s)
+        tbl = tbl.sort_values(["Status", "IS Net %"], ascending=[True, False], key=lambda s: s.map({"✅ Lolos semua": 0, "✅ Lolos (mode Vela)": 0}).fillna(1) if s.name == "Status" else s)
         st.caption("Urutan berdasarkan hasil in-sample (data unseen hanya dipakai sebagai ujian, bukan untuk memilih). Klik satu baris untuk melihat detail. "
                    "DSR % = peluang hasil in-sample bukan kebetulan setelah dikoreksi jumlah variasi yang dicoba.")
         pbo = res.get("search_tests", {}).get("pbo")
@@ -451,8 +549,9 @@ with t_res:
             for k in ["Net P&L %", "Win rate %", "Max DD %", "Rata2/trade %"]:
                 cmp[k] = cmp[k] * 100
             st.dataframe(cmp.style.format("{:.2f}"), width='stretch')
-            st.caption(f"Walk-forward: untung di {o['wf']*100:.0f}% periode · Stabilitas parameter: {o['stab']*100:.0f}% tetangga untung "
-                       f"(median PF tetangga {o['stab_pf']:.2f}) · biaya dihitung · posisi {lev:g}x modal · "
+            stab_txt = (f"Stabilitas parameter: {o['stab']*100:.0f}% tetangga untung (median PF tetangga {o['stab_pf']:.2f})"
+                        if o["stab"] == o["stab"] else "Stabilitas parameter: tidak dicek (mode Vela)")
+            st.caption(f"Walk-forward: untung di {o['wf']*100:.0f}% periode · {stab_txt} · biaya dihitung · posisi {lev:g}x modal · "
                        "OOS di atas sudah termasuk candle baru sejak pencarian.")
 
             ctx = dict(o=o, res=res, cfg=cfg, cc=cc, dfc=dfc, n=n, split=split, is_start=is_start, skey=f"{res.get('id', '0')}_{ss.sel}",
@@ -497,7 +596,7 @@ with t_res:
                     "Arah": np.where(ftr["dir"] == 1, "Long", "Short"),
                     "Harga masuk": ftr["ep"], "Harga keluar": ftr["xp"],
                     "P&L %": ftr["ret"] * 100,
-                    "Alasan keluar": np.array(["Sinyal", "Stop loss", "Take profit", "Akhir data"])[ftr["reason"]],
+                    "Alasan keluar": np.array(["Sinyal", "Stop loss", "Take profit", "Akhir data", "Waktu habis"])[ftr["reason"]],
                     "Periode": np.where(ftr["ent"] >= split, "Unseen", "In-sample")})
                 a1, a2, a3, a4 = st.columns(4)
                 r = ftr["ret"]
@@ -548,8 +647,10 @@ with t_res:
                 strat, indi = to_pine(o["fam"], o["params"], cfg["direction"], f"{E.FAMILIES[o['fam']]['name']} #{ss.sel+1}",
                                       tv_sym, res["tf"], cfg["pine_cost"], lev, note, trows)
                 st.markdown("**Cara pakai:** buka TradingView → Pine Editor → tempel kode → *Add to chart*. "
-                            "Versi **strategy** menampilkan hasil backtest TradingView; versi **indicator** hanya label Long/Short/Exit "
-                            "dan bisa dipasang alert.")
+                            "Versi **indicator** menghitung posisi sendiri dan **sama persis** dengan aplikasi (label Long/Short/TP1/SL/TP/Exit + alert). "
+                            "Versi **strategy** memakai mesin order TradingView: kalau stop loss dan take profit tersentuh di candle yang sama, "
+                            "TradingView menebak urutannya sendiri (aplikasi menganggap stop loss duluan), jadi angkanya bisa sedikit beda. "
+                            "Jam sesi, hari, dan tren timeframe besar dihitung dari waktu UTC candle.")
                 e1, e2 = st.columns(2)
                 e1.download_button("⬇️ Pine strategy (.pine)", strat, f"strategy_{tv_sym}_{res['tf']}.pine", width='stretch')
                 e2.download_button("⬇️ Pine indicator (.pine)", indi, f"indicator_{tv_sym}_{res['tf']}.pine", width='stretch')

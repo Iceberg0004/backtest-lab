@@ -6,22 +6,30 @@ Ini bukan produk LuxAlgo dan tidak memakai merek atau kode mereka.
 ## Datanya dari mana? (otomatis, tidak perlu download manual)
 | Pasar | Sumber | Catatan |
 |---|---|---|
-| Crypto (BTCUSDT, ETHUSDT, …) | Binance (gratis, realtime) | Riwayat sejak koin listing (BTC sejak Agustus 2017). |
-| Forex & emas (EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, USDCHF, NZDUSD, XAUUSD, …) | **Dukascopy** (default) | Riwayat sejak 2003, dipakai untuk backtest dan data unseen. |
+| Crypto (±80 pair USDT paling ramai di Binance, daftar diperbarui tiap 6 jam) | Binance (gratis, realtime) | Riwayat sejak koin listing (BTC sejak Agustus 2017). Token saham (NVDAB dll) dan stablecoin tidak ikut. |
+| Forex mayor & cross (EURUSD, GBPJPY, EURAUD, …), emas, perak | **Dukascopy** (default) | Riwayat sejak 2003, dipakai untuk backtest dan data unseen. |
+| Indeks (US30, NAS100, SPX500, GER40, UK100, JPN225) dan minyak (WTI, BRENT) | Dukascopy | Indeks sejak ±2012, minyak sejak ±2011. Spread diisi dalam **poin** (SPX500 0,1 poin, minyak sen). Chart live memakai Dukascopy saja. |
 | Candle yang sedang berjalan untuk forex & emas | biquote.io | Harga live dari broker MT5, jadi bisa beda sedikit dengan Dukascopy. Itu normal. |
 | Cadangan | Yahoo Finance | 1h hanya ±2 tahun, 1m hanya 7 hari. Emas memakai GC=F (futures). |
 | Opsional (pakai API key gratis) | OANDA practice, Twelve Data | Nonaktif sampai kamu mengisi key. Belum diuji karena belum ada key. |
 
 Data pertama kali diunduh lalu disimpan di cache (`/tmp/vela_cache` secara default, atau folder di `VELA_CACHE`). Setelah itu hanya **candle baru** yang diambil, dan chart diperbarui otomatis setiap beberapa detik.
 Backtest hanya memakai candle yang **sudah tutup**.
+Timeframe kecil dibatasi supaya server gratis tidak kehabisan memori: 1m 120 hari, 5m 3 tahun, 15m 6 tahun (crypto 3m 1 tahun).
 
 ## Cara pakai singkat
 1. **Sidebar:** pilih sumber, simbol, timeframe, dan tanggal mulai.
 2. **Tab "Cari Strategi":**
    - Tulis target, misalnya "BTC 1h trend, profit factor 1.5+, drawdown di bawah 20%", lalu klik **Terapkan**. Atau atur sendiri.
    - Atur persen data unseen, walk-forward, biaya (fee/slippage untuk crypto, **spread dalam pip** untuk forex), dan jenis strategi.
+   - Pilih **mode penilaian**:
+     - **Ketat (disarankan):** harus lolos data unseen, walk-forward, stabilitas parameter, dan tidak overfit.
+     - **Mode Vela (longgar):** cukup lolos target di data lama dan data unseen. Hasilnya lebih banyak, tapi **lebih mungkin cuma kebetulan**. Rapor (grade) tetap memakai cek versi ketat.
+   - Pilih **cara mencari**: *Acak*, atau *Evolusi* (variasi yang bagus di data lama diubah sedikit-sedikit; data unseen tidak dipakai untuk memilih). Semua percobaan tetap dihitung di DSR.
+   - Centang **kombinasi filter** kalau mau sinyal masuk dikonfirmasi filter lain (sesi, hari, tren timeframe besar, volatilitas, RSI, volume).
    - Klik **Mulai cari strategi**.
-3. **Tab "Hasil & Detail":** klik satu baris. Di situ ada:
+3. **Tab "Scan banyak pasar":** pilih beberapa pasar dan timeframe, lalu klik **Mulai scan**. Pencarian yang sama dijalankan di semuanya (dengan batas waktu), lalu diurutkan dalam satu tabel. Hasil satu pasar bisa dibuka di "Hasil & Detail".
+4. **Tab "Hasil & Detail":** klik satu baris. Di situ ada:
    - Chart dengan garis indikator dan label Long/Short/Exit beserta P&L.
    - Performance: equity curve dan P&L harian/mingguan/bulanan.
    - Trades: daftar transaksi.
@@ -29,10 +37,10 @@ Backtest hanya memakai candle yang **sudah tutup**.
    - **🧪 Uji ketahanan**, **🌍 Multi-aset**, **🎯 Realisme** (lihat di bawah).
    - Export Pine Script dan simpan strategi (JSON).
    - Di atasnya ada **Rapor ketahanan** (A sampai E, skor 0–100).
-4. **Tab "Walk-forward":** optimasi ulang sungguhan dari waktu ke waktu.
-5. **Tab "Portofolio":** gabungkan beberapa strategi yang tidak bergerak bersamaan.
-6. **Tab "Simpan & Bandingkan":** upload file JSON strategi lama, uji ulang di data terbaru, bandingkan.
-7. **Tab "Chart Live":** chart realtime. Kalau strategi sudah dipilih, garis dan sinyalnya ikut tampil, dan kamu bisa lihat apakah strategi sedang dalam posisi.
+5. **Tab "Walk-forward":** optimasi ulang sungguhan dari waktu ke waktu.
+6. **Tab "Portofolio":** gabungkan beberapa strategi yang tidak bergerak bersamaan.
+7. **Tab "Simpan & Bandingkan":** upload file JSON strategi lama, uji ulang di data terbaru, bandingkan.
+8. **Tab "Chart Live":** chart realtime. Kalau strategi sudah dipilih, garis dan sinyalnya ikut tampil, dan kamu bisa lihat apakah strategi sedang dalam posisi.
 
 ## Cara mencegah "overfitting" (strategi yang cuma cocok dengan data lama)
 - **Data unseen.** Bagian data terbaru (misalnya 30%) tidak dipakai saat mencari. Strategi harus tetap bagus di bagian ini.
@@ -59,19 +67,24 @@ Semua tes berat hanya jalan kalau tombolnya diklik.
 - **Urutan SL/TP asli.** Kalau satu candle menyentuh stop loss dan take profit sekaligus, aplikasi bisa membuka candle 1 menit untuk tahu mana yang duluan (default tetap menganggap SL duluan).
 - **Funding rate** (crypto, seperti perpetual futures) dari riwayat funding Binance, dan **swap** forex/emas dengan angka per tahun yang kamu isi.
 - **Filter kondisi pasar (ADX)** ikut dicari: hanya trading saat trending, hanya saat sideways, atau tanpa filter.
-- **9 jenis strategi:** MA cross, RSI, Donchian, Bollinger squeeze, MACD, Supertrend, Keltner, Stoch RSI pullback, Z-score.
+
+## Jenis strategi, exit, dan filter
+- **28 jenis strategi:** MA cross, RSI, Donchian, Bollinger squeeze, MACD, Supertrend, Keltner, Stoch RSI pullback, Z-score, Hull/TEMA/KAMA cross, Ichimoku, Parabolic SAR, Heikin-Ashi, CCI, Williams %R, MFI, OBV, breakout + volume, ATR channel, pivot support/resistance, inside bar / NR7, engulfing, opening range breakout (hanya timeframe ≤ 1 jam), Aroon, Vortex, Squeeze Momentum, linear regression channel, divergence RSI.
+- **Exit (dicoba otomatis):** stop loss ATR atau %, take profit, ambil untung 50% di TP1, stop pindah ke harga masuk (breakeven) setelah X R, trailing ATR atau chandelier, keluar setelah N candle, keluar hanya saat sinyal kebalikan.
+- **Filter konfirmasi (kalau kombinasi dicentang):** sesi Asia / London / New York / London+NY (jam UTC), hari (tanpa Senin / tanpa Jumat / hari kerja), tren timeframe besar (4 jam / harian, hanya candle besar yang sudah tutup, jadi tanpa "melihat masa depan"), volatilitas tinggi / rendah, RSI di sisi yang sama, volume di atas rata-rata.
 
 ## Export ke TradingView
 Ada dua file `.pine` (Pine Script v5):
 - **strategy**: menampilkan hasil backtest di TradingView.
-- **indicator**: hanya label Long/Short/Exit, dan bisa dipasang alert.
+- **indicator**: label Long/Short/TP1/SL/TP/Exit, bisa dipasang alert. Posisinya dihitung sendiri, **sama persis** dengan aplikasi.
 
-Keduanya punya **tabel statistik** di pojok chart (hasil uji aplikasi; versi strategy juga menampilkan hasil TradingView sendiri) dan **alert** untuk sinyal Long/Short/Exit, kena stop loss, kena take profit, dan posisi baru. Semua 9 jenis strategi sudah dicek dengan PineTS (emulator Pine open-source): entry dan exit sama persis dengan aplikasi.
+Keduanya punya **tabel statistik** di pojok chart (hasil uji aplikasi; versi strategy juga menampilkan hasil TradingView sendiri) dan **alert** untuk sinyal Long/Short/Exit, kena stop loss, kena take profit, dan posisi baru. Semua 28 jenis strategi, semua filter, dan semua jenis exit sudah dicek dengan PineTS (emulator Pine open-source) di 63 kasus: versi indicator sama persis dengan aplikasi. Versi strategy juga sama, kecuali trade yang SL dan TP-nya tersentuh di candle yang sama (TradingView menebak urutannya sendiri).
 
 Caranya: buka TradingView → Pine Editor → tempel kodenya → Add to chart, di simbol dan timeframe yang sama.
 Hasil di TradingView bisa sedikit berbeda karena:
 - data broker-nya beda (misalnya OANDA vs Dukascopy);
 - urutan kena SL/TP di dalam satu candle (aplikasi ini selalu menganggap SL kena lebih dulu);
+- jam sesi, hari, dan tren timeframe besar dihitung dari waktu **UTC** candle, jadi candle harian broker yang tutup di jam lain bisa memberi hasil sedikit beda;
 - biaya spread di Pine dihitung kira-kira sebagai komisi %.
 
 ## Menjalankan di komputer sendiri

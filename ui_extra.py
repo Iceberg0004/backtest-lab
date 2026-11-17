@@ -53,7 +53,7 @@ def grade_inputs(o, res, t):
     pbo = st_.get("pbo")
     wfo = st_.get("wfo")
     b = t.get("basket")
-    return dict(oos_pass=bool(o["passed"]), dsr=t.get("dsr", {}).get("dsr"), pbo=pbo["pbo"] if pbo else None,
+    return dict(oos_pass=bool(t.get("strict_pass", o["passed"])), dsr=t.get("dsr", {}).get("dsr"), pbo=pbo["pbo"] if pbo else None,
                 perm_p=t["perm"]["p"] if "perm" in t else None,
                 wfe=(wfo["wfe"] if wfo and not math.isnan(wfo["wfe"]) else (0.0 if wfo else None)),
                 jitter=t["jitter"]["share_profit"] if "jitter" in t else None,
@@ -72,6 +72,16 @@ def render_report(ctx):
         t["dsr"] = R.deflated_sharpe(itr["daily"], res["meta"]["trial_sr"], res.get("search_tests", {}).get("n_eff"))
         t["oos_psr"] = R.psr(otr["daily"])
         t["is_sharpe"], t["oos_sharpe"] = im.get("sharpe", 0.0), om.get("sharpe", 0.0)
+    if "strict_pass" not in t:
+        # the grade always uses the STRICT checks, also for results found in Vela mode
+        stab = o["stab"]
+        if stab != stab:
+            stab, _ = E.stability(o["fam"], o["params"], cc, ctx["is_start"], ctx["split"], cfg["direction"], cfg["cost_frac"],
+                                  cfg["cost_abs"], lev=cfg["lev"])
+        ism, om = o["is_m"], o["oos_m"]
+        overfit = (om["trades"] > 0 and om["pf"] < 0.6 * ism["pf"]) or om["net"] < 0
+        t["strict_pass"] = bool(o["is_pass"] and o["oos_ok"] and o["wf"] >= cfg["min_wf"] and stab >= cfg["min_stab"] and not overfit)
+        t["strict_stab"] = stab
     gi = grade_inputs(o, res, t)
     score, letter, parts = R.grade(gi)
     t["grade"] = (score, letter)
@@ -101,7 +111,7 @@ def render_report(ctx):
                f"±{d['sr0'] * ann:.2f}/tahun bisa muncul hanya karena kebetulan. Versi paling ketat (semua {d['N']:,} variasi dianggap "
                f"terpisah, sebaran Sharpe asli): batas {d['sr0_strict'] * ann:.2f}/tahun, DSR {pct(d['dsr_strict'], 0)}.")
     with st.expander("Rincian skor (apa saja yang dihitung)"):
-        names = dict(oos_pass="Lolos semua tes dasar (unseen, walk-forward, stabilitas)", dsr="Deflated Sharpe Ratio",
+        names = dict(oos_pass="Lolos tes dasar versi ketat (unseen, walk-forward, stabilitas, tidak overfit)", dsr="Deflated Sharpe Ratio",
                      pbo="PBO (CSCV) seluruh pencarian", perm_p="Tes harga acak (permutation)", wfe="Walk-forward efficiency",
                      jitter="Parameter digeser ±% tetap untung", basket="Lolos di aset lain", cost2x="Tetap untung saat biaya 2x")
         rows = []
@@ -273,7 +283,8 @@ def render_realism(ctx):
     st.caption("Kalau dalam satu candle harga menyentuh stop loss DAN take profit, backtest biasa tidak tahu mana yang duluan. "
                "Aplikasi ini default menganggap stop loss duluan (paling aman). Tombol ini membuka candle 1 menit untuk candle-candle itu "
                "dan memakai urutan yang sebenarnya.")
-    if o["params"]["tp_atr"] <= 0:
+    _pp = E.full_params(o["params"])
+    if (_pp["tp_pct"] if _pp["sl_mode"] == 1 else _pp["tp_atr"]) <= 0 and _pp["tp1_r"] <= 0:
         st.info("Strategi ini tidak memakai take profit tetap, jadi masalah ini tidak terjadi.")
     elif st.button("▶️ Cek dengan candle 1 menit", key=f"bi_{ctx['skey']}"):
         bar = st.progress(0.0, text="Mengambil candle 1 menit...")

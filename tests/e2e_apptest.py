@@ -1,11 +1,13 @@
 """End-to-end UI test with Streamlit's AppTest (no browser needed).
-Usage: python tests/e2e_apptest.py binance BTCUSDT   |   python tests/e2e_apptest.py dukascopy EURUSD"""
+Usage: python tests/e2e_apptest.py binance BTCUSDT [carry] [vela] [evo] [combo] [scan]
+       python tests/e2e_apptest.py dukascopy EURUSD"""
 import os, sys, time
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from streamlit.testing.v1 import AppTest
 
 source, symbol = sys.argv[1], sys.argv[2]
-carry = len(sys.argv) > 3 and sys.argv[3] == "carry"
+flags = set(sys.argv[3:])
+carry = "carry" in flags
 t0 = time.time()
 at = AppTest.from_file(os.path.join(os.getcwd(), "app.py"), default_timeout=900)
 at.run()
@@ -19,7 +21,14 @@ if carry:
         at.checkbox(key="use_funding").check().run()
     else:
         at.checkbox(key="use_swap").check().run()
-print("setup ok", round(time.time() - t0, 1), "s")
+if "vela" in flags:
+    at.radio(key="mode").set_value("vela").run()
+if "evo" in flags:
+    at.radio(key="algo").set_value("evo").run()
+if "combo" in flags:
+    at.checkbox(key="combo").check().run()
+assert not at.exception, at.exception
+print("setup ok", sorted(flags), round(time.time() - t0, 1), "s")
 
 
 def click(label_start):
@@ -79,6 +88,20 @@ print("compare", {k: (round(v["full"]["net"] * 100, 2) if "full" in v else v.get
 # final grade after all tests: re-render
 at.run()
 t = at.session_state["tests"][key]
-print("FINAL grade", t.get("grade"))
+print("FINAL grade", t.get("grade"), "strict_pass", t.get("strict_pass"))
+if "scan" in flags:
+    at.multiselect(key="scan_tfs").set_value(["1h"]).run()
+    at.select_slider(key="scan_var").set_value(500).run()
+    at.select_slider(key="scan_time").set_value(120).run()
+    t1 = time.time()
+    click("🛰️ Mulai scan")
+    rows = at.session_state["scan_rows"]
+    print("scan", round(time.time() - t1, 1), "s")
+    for r in rows:
+        print("  ", {k: (round(v, 2) if isinstance(v, float) else v) for k, v in r.items() if k not in ("key", "best_idx")})
+    keys = [r["key"] for r in rows if r.get("key")]
+    if keys:
+        click("Buka di 'Hasil & Detail'")
+        print("opened", at.session_state["res"]["symbol"], at.session_state["res"]["tf"], "exceptions", at.exception)
 print("exceptions", at.exception)
 print("total", round(time.time() - t0, 1), "s")
