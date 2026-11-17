@@ -35,9 +35,10 @@ def _quick_search(cc, start, end, cfg, n_variants, rng, min_trades):
     among those meeting the user's targets, or None. Same sampler and engine as the main search."""
     best, best_any = None, None
     seen = set()
+    fams = E.allowed_families(cfg["families"], cc.tf_min, cc.has_volume) or list(cfg["families"])
     for k in range(n_variants):
-        fam = cfg["families"][k % len(cfg["families"])]
-        p = E.sample_params(fam, rng)
+        fam = fams[k % len(fams)]
+        p = E.sample_params(fam, rng, cc.tf_min, bool(cfg.get("combo", False)))
         key = (fam, tuple(sorted(p.items())))
         if key in seen:
             continue
@@ -181,23 +182,23 @@ def jitter(fam, p, cc, start, end, cfg, n=200, pct=0.2, seed=9):
     """Randomly nudge every numeric parameter by up to +/- pct and re-test. A robust strategy stays profitable."""
     rng = np.random.default_rng(seed)
     space = E.FAMILIES[fam]["space"]
+    fl_keys = ("sl_atr", "tp_atr", "sl_pct", "tp_pct", "trail_atr", "tp1_r", "be_r")
     res = []
     for _ in range(n):
-        q = dict(p)
-        for k, v in p.items():
-            if k in ("ma_type", "regime"):
+        q = E.full_params(p)
+        for k, v in list(q.items()):
+            sp = space.get(k)
+            num_space = isinstance(sp, tuple) or (isinstance(sp, list) and all(isinstance(x, (int, float)) for x in sp))
+            if not (num_space or k in fl_keys or k in ("trend", "adx_thr", "max_bars")):
+                continue          # switches / categories (session, mode, MA type...) stay as they are
+            if isinstance(v, bool) or v == 0:
                 continue
-            if isinstance(v, (int, np.integer)) and not isinstance(v, bool):
+            if isinstance(v, (int, np.integer)):
                 lo = 2 if k not in ("trend", "lower", "upper", "exit_level", "k_lo", "k_hi", "adx_thr") else 1
-                if v == 0:
-                    continue
                 q[k] = max(lo, int(round(v * (1 + rng.uniform(-pct, pct)))))
             elif isinstance(v, float):
-                if v == 0:
-                    continue
                 q[k] = round(max(0.1, v * (1 + rng.uniform(-pct, pct))), 3)
-        if fam in ("ma_cross", "macd") and q["fast"] >= q["slow"]:
-            q["slow"] = q["fast"] + 2
+        q = E.fix_params(fam, q, cc.tf_min, combo=True)
         m, _ = E.run(fam, q, cc, start, end, cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], lev=cfg.get("lev", 1.0))
         res.append((m["net"], m["pf"], m["maxdd"], m["trades"]))
     a = np.array(res)

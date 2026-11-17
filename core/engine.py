@@ -7,76 +7,141 @@ import pandas as pd
 from numba import njit
 from . import indicators as ind
 
-# ------------------------------------------------------------------ families
-EXIT_SPACE = {"sl_atr": [1.0, 1.5, 2.0, 2.5, 3.0, 4.0], "tp_atr": [0.0, 1.5, 2.0, 3.0, 4.0, 6.0],
-              "trail_atr": [0.0, 0.0, 2.0, 3.0, 4.0]}
+# ------------------------------------------------------------------ families (see core/families.py)
+from .families import F as FAMILIES
 
-FAMILIES = {
-    "ma_cross": {"name": "Trend following (MA cross)",
-                 "space": {"ma_type": ["EMA", "SMA"], "fast": (5, 60), "slow": (20, 250), "trend": [0, 0, 100, 200]}},
-    "rsi_mr": {"name": "Mean reversion (RSI)",
-               "space": {"rsi_len": (5, 30), "lower": (15, 40), "upper": (60, 85), "exit_level": [50, 55, 60, 65],
-                         "trend": [0, 0, 100, 200]}},
-    "donchian": {"name": "Breakout (Donchian)",
-                 "space": {"entry_len": (10, 120), "exit_len": (5, 60), "trend": [0, 0, 100, 200]}},
-    "bb_squeeze": {"name": "Volatility compression (Bollinger squeeze)",
-                   "space": {"bb_len": (10, 50), "bb_mult": [1.5, 2.0, 2.5], "sq_len": (50, 200),
-                             "sq_factor": [0.6, 0.7, 0.8, 0.9]}},
-    "macd": {"name": "Momentum (MACD cross)",
-             "space": {"fast": (5, 20), "slow": (21, 60), "signal": (5, 15), "trend": [0, 0, 100, 200]}},
-    "supertrend": {"name": "Trend following (Supertrend)",
-                   "space": {"st_len": (7, 30), "st_mult": [1.5, 2.0, 2.5, 3.0, 3.5, 4.0], "trend": [0, 0, 100, 200]}},
-    "keltner": {"name": "Breakout (Keltner channel)",
-                "space": {"kc_len": (10, 80), "kc_mult": [1.0, 1.5, 2.0, 2.5, 3.0], "trend": [0, 0, 100, 200]}},
-    "stochrsi": {"name": "Pullback searah tren (Stochastic RSI)",
-                 "space": {"rsi_len": (7, 21), "stoch_len": (7, 21), "k_lo": [10, 15, 20, 25], "k_hi": [75, 80, 85, 90],
-                           "trend": [50, 100, 200]}},
-    "zscore": {"name": "Mean reversion (Z-score)",
-               "space": {"z_len": (20, 120), "z_entry": [1.5, 2.0, 2.5, 3.0], "z_exit": [0.0, 0.0, 0.5], "trend": [0, 0, 100, 200]}},
-}
-# searchable market-regime filter (applies to every family): 0 = off, 1 = only trade when trending (ADX >= thr),
-# 2 = only trade when ranging (ADX < thr)
+# exits (all searchable). sl_mode 0 = ATR based, 1 = percent of price
+EXIT_SPACE = {"sl_mode": [0, 0, 0, 1], "sl_atr": [1.0, 1.5, 2.0, 2.5, 3.0, 4.0], "tp_atr": [0.0, 1.5, 2.0, 3.0, 4.0, 6.0],
+              "sl_pct": [0.3, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0], "tp_pct": [0.0, 1.0, 2.0, 3.0, 5.0, 8.0],
+              "trail_atr": [0.0, 0.0, 2.0, 3.0, 4.0], "trail_mode": [0, 1],
+              "tp1_r": [0.0, 0.0, 0.0, 1.0, 1.5], "be_r": [0.0, 0.0, 0.0, 1.0, 1.5, 2.0],
+              "max_bars": [0, 0, 0, 12, 24, 48, 96], "exit_sig": [0, 0, 1]}
+TP1_FRAC = 0.5
+# searchable market-regime filter (every family)
 REGIME_SPACE = {"regime": [0, 0, 1, 2], "adx_thr": [20, 25]}
 REGIME_LABEL = {0: "tanpa filter", 1: "hanya saat pasar trending", 2: "hanya saat pasar sideways"}
-INT_KEYS = {"fast", "slow", "trend", "rsi_len", "lower", "upper", "exit_level", "entry_len", "exit_len",
-            "bb_len", "sq_len", "signal", "st_len", "kc_len", "stoch_len", "k_lo", "k_hi", "z_len", "regime", "adx_thr"}
+# combo builder: confirmation filters added to the entry signal
+FILTER_SPACE = {"sess": [0, 0, 0, 1, 2, 3, 4], "dow": [0, 0, 0, 1, 2, 3], "htf_m": [0, 0, 240, 1440], "htf_len": [20, 50, 100],
+                "vol": [0, 0, 1, 2], "rsi_f": [0, 0, 1], "volf": [0, 0, 1]}
+SESS = {1: (0, 8, "Asia"), 2: (7, 16, "London"), 3: (13, 21, "New York"), 4: (13, 16, "London+NY")}
+DOW = {1: "Senin-Jumat saja", 2: "tanpa Senin", 3: "tanpa Jumat"}
+DEFAULTS = {"regime": 0, "adx_thr": 20, "sl_mode": 0, "sl_pct": 1.0, "tp_pct": 0.0, "trail_mode": 0, "tp1_r": 0.0, "be_r": 0.0,
+            "max_bars": 0, "exit_sig": 0, "sess": 0, "dow": 0, "htf_m": 0, "htf_len": 50, "vol": 0, "rsi_f": 0, "volf": 0, "trend": 0}
+INT_KEYS = {"regime", "adx_thr", "sl_mode", "trail_mode", "max_bars", "exit_sig", "sess", "dow", "htf_m", "htf_len", "vol", "rsi_f", "volf"}
 
 
-def sample_params(fam, rng):
+def full_params(p):
+    q = dict(DEFAULTS)
+    q.update(p)
+    return q
+
+
+def allowed_families(fams, tf_min, has_volume=True):
+    out = []
+    for f in fams:
+        d = FAMILIES.get(f)
+        if d is None:
+            continue
+        if d["intraday"] and tf_min > 60:
+            continue
+        if d["needs_volume"] and not has_volume:
+            continue
+        out.append(f)
+    return out
+
+
+def fix_params(fam, p, tf_min=60, combo=False):
+    """Keep sampled/mutated parameters consistent."""
+    for k, v in FAMILIES[fam]["space"].items():
+        if isinstance(v, tuple):
+            p[k] = int(min(max(int(p[k]), v[0]), v[1]))
+    if fam in ("ma_cross", "macd", "ma2") and p["fast"] >= p["slow"] * 0.8:
+        p["slow"] = int(max(p["slow"], p["fast"] * 1.5 + 2))
+    if fam in ("donchian", "vol_bo") and p["exit_len"] > p["entry_len"]:
+        p["exit_len"] = max(3, p["entry_len"] // 2)
+    # partial TP only makes sense below the final target
+    tp_u = p["tp_atr"] if p.get("sl_mode", 0) == 0 else p["tp_pct"]
+    sl_u = p["sl_atr"] if p.get("sl_mode", 0) == 0 else p["sl_pct"]
+    if p.get("tp1_r", 0) > 0 and tp_u > 0 and p["tp1_r"] * sl_u >= tp_u:
+        p["tp1_r"] = 0.0
+    if not combo:
+        for k in FILTER_SPACE:
+            p[k] = DEFAULTS[k]
+    if tf_min >= 1440:
+        p["sess"] = 0
+    if p.get("htf_m", 0) and p["htf_m"] <= tf_min:
+        p["htf_m"] = 0
+    return p
+
+
+def sample_params(fam, rng, tf_min=60, combo=False):
     p = {}
     for k, v in FAMILIES[fam]["space"].items():
         p[k] = rng.choice(v) if isinstance(v, list) else int(rng.integers(v[0], v[1] + 1))
+    for sp in (REGIME_SPACE, EXIT_SPACE, FILTER_SPACE):
+        for k, v in sp.items():
+            p[k] = rng.choice(v)
+    for k in list(p):
         if isinstance(p[k], np.generic):
             p[k] = p[k].item()
-    for k, v in REGIME_SPACE.items():
-        p[k] = int(rng.choice(v))
-    for k, v in EXIT_SPACE.items():
-        p[k] = float(rng.choice(v))
-    if fam in ("ma_cross", "macd") and p["fast"] >= p["slow"] * 0.8:
-        p["slow"] = int(max(p["slow"], p["fast"] * 1.5 + 2))
-    if fam == "donchian" and p["exit_len"] > p["entry_len"]:
-        p["exit_len"] = max(3, p["entry_len"] // 2)
-    return p
+        if k in INT_KEYS:
+            p[k] = int(p[k])
+        elif k in EXIT_SPACE:
+            p[k] = float(p[k])
+    return fix_params(fam, p, tf_min, combo)
+
+
+def mutate(fam, p, rng, tf_min=60, combo=False, n_changes=None):
+    """Evolutionary search: copy a good parameter set and change 1-3 settings a little."""
+    q = dict(p)
+    space = dict(FAMILIES[fam]["space"]); space.update(REGIME_SPACE); space.update(EXIT_SPACE)
+    if combo:
+        space.update(FILTER_SPACE)
+    keys = list(space)
+    for k in rng.choice(keys, size=n_changes or int(rng.integers(1, 4)), replace=False):
+        v = space[k]
+        if isinstance(v, tuple):
+            q[k] = int(round(q[k] * rng.uniform(0.8, 1.2) + rng.choice([-1, 1])))
+        else:
+            vals = sorted(set(v), key=lambda x: (str(type(x)), x))
+            if q.get(k) in vals and rng.random() < 0.7 and len(vals) > 1:
+                i = vals.index(q[k]) + int(rng.choice([-1, 1]))
+                q[k] = vals[min(max(i, 0), len(vals) - 1)]
+            else:
+                q[k] = rng.choice(vals)
+            if isinstance(q[k], np.generic):
+                q[k] = q[k].item()
+    for k in list(q):
+        if k in INT_KEYS:
+            q[k] = int(q[k])
+        elif k in EXIT_SPACE:
+            q[k] = float(q[k])
+    return fix_params(fam, q, tf_min, combo)
 
 
 class Cache:
     """Per-dataset indicator cache so thousands of variants stay fast."""
     def __init__(self, df):
         self.o, self.h, self.l, self.c = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
+        self.v = df["volume"].to_numpy(float) if "volume" in df else np.zeros(len(df))
+        self.has_volume = bool(np.nansum(self.v) > 0)
         self.atr = ind.atr(self.h, self.l, self.c, 14)
         self.d = {}
         self.index = df.index
-        # last bar of every UTC day -> daily returns for Sharpe / DSR / PBO / portfolio
+        self.t_ms = np.asarray(pd.DatetimeIndex(df.index).as_unit("ms").asi8, np.int64)
+        self.hour = (self.t_ms // 3_600_000) % 24
+        self.day = self.t_ms // 86_400_000
+        self.dow = (self.day + 3) % 7  # 0 = Monday (UTC)
+        self.tf_min = int(np.median(np.diff(self.t_ms[: min(len(df), 500)])) // 60000) if len(df) > 2 else 60
         day = np.asarray(df.index.normalize().asi8)
         self.day_end = np.flatnonzero(np.r_[day[1:] != day[:-1], True])
         span_years = max((df.index[-1] - df.index[0]).total_seconds() / (365.25 * 86400), 1e-9)
         self.days_per_year = len(self.day_end) / span_years
         self.bars_per_year = len(df) / span_years
-        # optional holding costs per bar (fraction of position): funding / swap. 0 = off.
         self.carry_long = np.zeros(len(df))
         self.carry_short = np.zeros(len(df))
-        # intrabar resolution: 1 = take-profit was hit first in this bar (from lower-timeframe data)
         self.resolve = np.zeros(len(df), np.int8)
+        self.pct_unit = self.c * 0.01
 
     def get(self, key, fn):
         if key not in self.d:
@@ -90,181 +155,167 @@ def _trend(cc, n):
     return cc.get(("ema", "c", n), lambda: ind.ema(cc.c, n))
 
 
+def filter_masks(p, cc):
+    """Entry confirmations: trend EMA, ADX regime, session, day of week, higher-timeframe trend,
+    volatility regime, RSI side, volume. Returns (long_ok, short_ok, lines)."""
+    n = len(cc.c)
+    L = np.ones(n, bool); S = np.ones(n, bool); lines = {}
+    with np.errstate(invalid="ignore"):
+        tr = _trend(cc, p.get("trend", 0))
+        if tr is not None:
+            L &= cc.c > tr; S &= cc.c < tr
+            lines[f"Trend EMA {p['trend']}"] = tr
+        rg = p.get("regime", 0)
+        if rg:
+            a = cc.get(("adx",), lambda: ind.adx(cc.h, cc.l, cc.c, cc.atr))
+            ok = (a >= p["adx_thr"]) if rg == 1 else (a < p["adx_thr"])
+            L &= ok; S &= ok
+            lines["_adx"] = a
+        if p.get("sess", 0):
+            a, b, _ = SESS[p["sess"]]
+            ok = (cc.hour >= a) & (cc.hour < b)
+            L &= ok; S &= ok
+        dw = p.get("dow", 0)
+        if dw:
+            ok = cc.dow < 5 if dw == 1 else (cc.dow != 0 if dw == 2 else cc.dow != 4)
+            L &= ok; S &= ok
+        if p.get("htf_m", 0):
+            up, dn = cc.get(("htf", p["htf_m"], p["htf_len"]), lambda: ind.htf_trend(cc.t_ms, cc.c, p["htf_m"] * 60000, p["htf_len"]))
+            L &= up; S &= dn
+        vv = p.get("vol", 0)
+        if vv:
+            r = cc.get(("volr",), lambda: cc.atr / ind.sma(cc.atr, 100))
+            ok = (r > 1) if vv == 1 else (r < 1)
+            L &= ok; S &= ok
+        if p.get("rsi_f", 0):
+            r14 = cc.get(("rsi", 14), lambda: ind.rsi(cc.c, 14))
+            L &= r14 > 50; S &= r14 < 50
+        if p.get("volf", 0):
+            vm = cc.get(("vsma", 20), lambda: ind.sma(cc.v, 20))
+            ok = cc.v > vm
+            L &= ok; S &= ok
+    return L, S, lines
+
+
 def signals(fam, p, cc: Cache):
     """Returns (long_entry, long_exit, short_entry, short_exit, lines) evaluated at bar close."""
-    c = cc.c
-    lines = {}
-    tr = _trend(cc, p.get("trend", 0))
-    tl = np.ones_like(c, bool) if tr is None else (c > tr)
-    ts = np.ones_like(c, bool) if tr is None else (c < tr)
-    if tr is not None:
-        lines[f"Trend EMA {p['trend']}"] = tr
-    if fam == "ma_cross":
-        f = cc.get((p["ma_type"], p["fast"]), lambda: ind.ma(p["ma_type"], c, p["fast"]))
-        s = cc.get((p["ma_type"], p["slow"]), lambda: ind.ma(p["ma_type"], c, p["slow"]))
-        up, dn = ind.crossover(f, s), ind.crossunder(f, s)
-        le, lx, se, sx = up & tl, dn, dn & ts, up
-        lines[f"{p['ma_type']} {p['fast']}"] = f
-        lines[f"{p['ma_type']} {p['slow']}"] = s
-    elif fam == "rsi_mr":
-        r = cc.get(("rsi", p["rsi_len"]), lambda: ind.rsi(c, p["rsi_len"]))
-        le = ind.crossover(r, p["lower"]) & tl
-        lx = ind.crossover(r, p["exit_level"])
-        se = ind.crossunder(r, p["upper"]) & ts
-        sx = ind.crossunder(r, 100 - p["exit_level"])
-        lines["_rsi"] = r
-    elif fam == "donchian":
-        hh = cc.get(("hh", p["entry_len"]), lambda: ind.shift(ind.rolling_max(cc.h, p["entry_len"])))
-        ll = cc.get(("ll", p["entry_len"]), lambda: ind.shift(ind.rolling_min(cc.l, p["entry_len"])))
-        xh = cc.get(("hh", p["exit_len"]), lambda: ind.shift(ind.rolling_max(cc.h, p["exit_len"])))
-        xl = cc.get(("ll", p["exit_len"]), lambda: ind.shift(ind.rolling_min(cc.l, p["exit_len"])))
-        with np.errstate(invalid="ignore"):
-            le, lx, se, sx = (c > hh) & tl, c < xl, (c < ll) & ts, c > xh
-        lines[f"Donchian high {p['entry_len']}"] = hh
-        lines[f"Donchian low {p['entry_len']}"] = ll
-    elif fam == "bb_squeeze":
-        L, m = p["bb_len"], p["bb_mult"]
-        basis = cc.get(("sma", L), lambda: ind.sma(c, L))
-        sd = cc.get(("sd", L), lambda: ind.stdev(c, L))
-        up, lo = basis + m * sd, basis - m * sd
-        with np.errstate(invalid="ignore", divide="ignore"):
-            bbw = (up - lo) / basis
-        thr = ind.sma(bbw, p["sq_len"]) * p["sq_factor"]
-        with np.errstate(invalid="ignore"):
-            sq = (bbw < thr).astype(float)
-        recent = ind.shift(ind.rolling_max(sq, 5)) == 1
-        le = ind.crossover(c, up) & recent
-        lx = ind.crossunder(c, basis)
-        se = ind.crossunder(c, lo) & recent
-        sx = ind.crossover(c, basis)
-        lines[f"BB upper {L}/{m}"] = up
-        lines[f"BB basis {L}"] = basis
-        lines[f"BB lower {L}/{m}"] = lo
-    elif fam == "macd":
-        ef = cc.get(("ema", "c", p["fast"]), lambda: ind.ema(c, p["fast"]))
-        es = cc.get(("ema", "c", p["slow"]), lambda: ind.ema(c, p["slow"]))
-        mline = ef - es
-        sig = ind.ema(mline, p["signal"])
-        up, dn = ind.crossover(mline, sig), ind.crossunder(mline, sig)
-        le, lx, se, sx = up & tl, dn, dn & ts, up
-        lines["_macd"] = mline
-        lines["_macd_signal"] = sig
-    elif fam == "supertrend":
-        a = cc.get(("atr", p["st_len"]), lambda: ind.atr(cc.h, cc.l, c, p["st_len"]))
-        up_b, dn_b, d = cc.get(("st", p["st_len"], p["st_mult"]), lambda: ind.supertrend(cc.h, cc.l, c, a, p["st_mult"]))
-        d1 = ind.shift(d)
-        flip_up, flip_dn = (d == 1) & (d1 == -1), (d == -1) & (d1 == 1)
-        le, lx, se, sx = flip_up & tl, flip_dn, flip_dn & ts, flip_up
-        lines["Supertrend"] = np.where(d == 1, up_b, np.where(d == -1, dn_b, np.nan))
-    elif fam == "keltner":
-        basis = cc.get(("ema", "c", p["kc_len"]), lambda: ind.ema(c, p["kc_len"]))
-        up_b, lo_b = basis + p["kc_mult"] * cc.atr, basis - p["kc_mult"] * cc.atr
-        le = ind.crossover(c, up_b) & tl
-        lx = ind.crossunder(c, basis)
-        se = ind.crossunder(c, lo_b) & ts
-        sx = ind.crossover(c, basis)
-        lines[f"KC upper {p['kc_len']}/{p['kc_mult']}"] = up_b
-        lines[f"KC basis {p['kc_len']}"] = basis
-        lines[f"KC lower {p['kc_len']}/{p['kc_mult']}"] = lo_b
-    elif fam == "stochrsi":
-        k = cc.get(("srsi", p["rsi_len"], p["stoch_len"]), lambda: ind.stoch_rsi_k(c, p["rsi_len"], p["stoch_len"]))
-        le = ind.crossover(k, p["k_lo"]) & tl
-        lx = ind.crossunder(k, p["k_hi"])
-        se = ind.crossunder(k, p["k_hi"]) & ts
-        sx = ind.crossover(k, p["k_lo"])
-        lines["_stoch"] = k
-    elif fam == "zscore":
-        z = cc.get(("z", p["z_len"]), lambda: ind.zscore(c, p["z_len"]))
-        le = ind.crossover(z, -p["z_entry"]) & tl
-        lx = ind.crossover(z, p["z_exit"])
-        se = ind.crossunder(z, p["z_entry"]) & ts
-        sx = ind.crossunder(z, -p["z_exit"])
-        lines["_z"] = z
-    else:
-        raise ValueError(fam)
-    rg = p.get("regime", 0)
-    if rg:
-        a = cc.get(("adx",), lambda: ind.adx(cc.h, cc.l, c, cc.atr))
-        with np.errstate(invalid="ignore"):
-            ok = (a >= p["adx_thr"]) if rg == 1 else (a < p["adx_thr"])
-        le, se = le & ok, se & ok
-        lines["_adx"] = a
-    f = lambda a: np.nan_to_num(a, nan=0).astype(np.bool_)
-    return f(le), f(lx), f(se), f(sx), lines
+    p = full_params(p)
+    le, lx, se, sx, lines = FAMILIES[fam]["py"](p, cc)
+    f = lambda a: np.nan_to_num(np.asarray(a, float), nan=0).astype(np.bool_)
+    le, lx, se, sx = f(le), f(lx), f(se), f(sx)
+    if p.get("exit_sig", 0) == 1:   # exit only on the opposite raw signal
+        lx, sx = se.copy(), le.copy()
+    L, S, fl = filter_masks(p, cc)
+    lines.update(fl)
+    return le & L, lx, se & S, sx, lines
 
 
 def describe(fam, p, direction="both"):
+    p = full_params(p)
     d = {"long": "hanya Long (beli)", "short": "hanya Short (jual)", "both": "Long dan Short"}[direction]
-    tr = f", hanya searah tren (harga di atas/bawah EMA {p['trend']})" if p.get("trend") else ""
-    if fam == "ma_cross":
-        core = (f"Beli saat {p['ma_type']} {p['fast']} memotong ke atas {p['ma_type']} {p['slow']}{tr}; "
-                f"jual/short saat memotong ke bawah")
-    elif fam == "rsi_mr":
-        core = (f"Beli saat RSI({p['rsi_len']}) naik kembali di atas {p['lower']} (jenuh jual){tr}, keluar saat RSI > {p['exit_level']}; "
-                f"short saat RSI turun di bawah {p['upper']}, keluar saat RSI < {100 - p['exit_level']}")
-    elif fam == "donchian":
-        core = (f"Beli saat harga menembus high {p['entry_len']} candle{tr}, keluar saat tembus low {p['exit_len']} candle; "
-                f"short kebalikannya")
-    elif fam == "bb_squeeze":
-        core = (f"Tunggu Bollinger({p['bb_len']}, {p['bb_mult']}) menyempit (lebar < {p['sq_factor']} x rata-rata {p['sq_len']} candle), "
-                f"lalu beli saat harga tembus band atas / short saat tembus band bawah; keluar di garis tengah")
-    elif fam == "macd":
-        core = (f"Beli saat MACD({p['fast']},{p['slow']},{p['signal']}) memotong ke atas signal{tr}; "
-                f"short saat memotong ke bawah")
-    elif fam == "supertrend":
-        core = f"Beli saat Supertrend({p['st_len']}, {p['st_mult']}) berbalik naik{tr}; short saat berbalik turun"
-    elif fam == "keltner":
-        core = (f"Beli saat harga tembus band atas Keltner (EMA {p['kc_len']} + {p['kc_mult']} x ATR){tr}, keluar saat "
-                f"kembali di bawah EMA; short kebalikannya")
-    elif fam == "stochrsi":
-        core = (f"Searah tren EMA {p['trend']}: beli saat Stoch RSI({p['rsi_len']},{p['stoch_len']}) naik di atas {p['k_lo']} "
-                f"(selesai koreksi), keluar saat turun di bawah {p['k_hi']}; short kebalikannya")
-    else:
-        core = (f"Beli saat Z-score({p['z_len']}) naik kembali di atas -{p['z_entry']}{tr}, keluar saat Z > {p['z_exit']}; "
-                f"short saat turun kembali di bawah {p['z_entry']}, keluar saat Z < -{p['z_exit']}")
+    core = FAMILIES[fam]["desc"](p)
+    f = []
+    if p.get("trend"):
+        f.append(f"searah tren EMA {p['trend']}")
     if p.get("regime"):
-        core += f"; {REGIME_LABEL[p['regime']]} (ADX {'≥' if p['regime'] == 1 else '<'} {p['adx_thr']})"
-    ex = f". Stop loss {p['sl_atr']} x ATR"
-    ex += f", take profit {p['tp_atr']} x ATR" if p["tp_atr"] > 0 else ", tanpa take profit tetap"
-    ex += f", trailing stop {p['trail_atr']} x ATR" if p["trail_atr"] > 0 else ""
-    return f"{core}{ex}. Arah: {d}."
+        f.append(f"{REGIME_LABEL[p['regime']]} (ADX {'≥' if p['regime'] == 1 else '<'} {p['adx_thr']})")
+    if p.get("sess"):
+        a, b, nm = SESS[p["sess"]]
+        f.append(f"sesi {nm} ({a:02d}-{b:02d} UTC)")
+    if p.get("dow"):
+        f.append(DOW[p["dow"]])
+    if p.get("htf_m"):
+        f.append(f"tren {'4 jam' if p['htf_m'] == 240 else 'harian'} searah (EMA {p['htf_len']})")
+    if p.get("vol"):
+        f.append("hanya saat volatilitas tinggi" if p["vol"] == 1 else "hanya saat volatilitas rendah")
+    if p.get("rsi_f"):
+        f.append("RSI(14) di sisi yang sama (>50 long, <50 short)")
+    if p.get("volf"):
+        f.append("volume di atas rata-rata 20 candle")
+    flt = (" Konfirmasi: " + ", ".join(f) + ".") if f else ""
+    if p["sl_mode"] == 1:
+        ex = f" Stop loss {p['sl_pct']}%"
+        ex += f", take profit {p['tp_pct']}%" if p["tp_pct"] > 0 else ", tanpa take profit tetap"
+    else:
+        ex = f" Stop loss {p['sl_atr']} x ATR"
+        ex += f", take profit {p['tp_atr']} x ATR" if p["tp_atr"] > 0 else ", tanpa take profit tetap"
+    if p["tp1_r"] > 0:
+        ex += f", ambil untung 50% di {p['tp1_r']}R"
+    if p["be_r"] > 0:
+        ex += f", stop pindah ke harga masuk setelah {p['be_r']}R"
+    if p["trail_atr"] > 0:
+        ex += f", trailing {'chandelier' if p['trail_mode'] == 1 else 'ATR'} {p['trail_atr']} x ATR"
+    if p["max_bars"] > 0:
+        ex += f", keluar paksa setelah {p['max_bars']} candle"
+    if p["exit_sig"] == 1:
+        ex += ", keluar hanya saat sinyal kebalikan"
+    return f"{core}.{flt}{ex}. Arah: {d}."
+
+
+def exit_args(p, cc):
+    """Simulator exit inputs (unit array + multipliers) from parameters."""
+    p = full_params(p)
+    if p["sl_mode"] == 1:
+        unit, sl, tp = cc.pct_unit, p["sl_pct"], p["tp_pct"]
+    else:
+        unit, sl, tp = cc.atr, p["sl_atr"], p["tp_atr"]
+    return (unit, float(sl), float(tp), float(p["trail_atr"]), int(p["trail_mode"]), float(p["tp1_r"]) * sl,
+            float(TP1_FRAC), float(p["be_r"]) * sl, int(p["max_bars"]))
 
 
 # ------------------------------------------------------------------ simulator
 @njit(cache=True)
-def simulate(o, h, l, c, atr, le, lx, se, sx, start, end, allow_long, allow_short,
-             sl_k, tp_k, tr_k, cost_frac, cost_abs, want_equity, lev, carry_l, carry_s, resolve):
-    """Signals are evaluated at the close of bar j and filled at the OPEN of bar j+1
-    (same as Pine strategy() default). Stops/targets use high/low of each bar; if both
-    are touched in one bar, the stop is assumed first (conservative) unless resolve[i] == 1
-    (lower-timeframe data showed the target was reached first).
-    carry_l / carry_s: holding cost per bar as a fraction of the position (funding / swap),
-    charged at each bar close while the position is open (negative = you receive it)."""
+def _rr(pos, ep, px, cf, ca):
+    if pos == 1:
+        return (px * (1 - cf) - ca - (ep * (1 + cf) + ca)) / ep
+    return ((ep * (1 - cf) - ca) - (px * (1 + cf) + ca)) / ep
+
+
+@njit(cache=True)
+def simulate(o, h, l, c, atr, unit, le, lx, se, sx, start, end, allow_long, allow_short,
+             sl_k, tp_k, tr_k, tr_mode, tp1_k, tp1_frac, be_k, max_bars,
+             cost_frac, cost_abs, want_equity, lev, carry_l, carry_s, resolve):
+    """Bar-by-bar simulator.
+    - Signals at the close of bar j fill at the OPEN of bar j+1 (same as Pine strategy() default).
+    - Stop / targets use each bar's high/low. If the stop and a target are both touched inside one bar,
+      the stop is assumed first (conservative) unless resolve[i] == 1 (1-minute data showed the target first).
+    - unit = ATR or 1% of price; stop = sl_k units, final target = tp_k units, partial target tp1_k units
+      (closes tp1_frac of the position), breakeven after be_k units, trailing tr_k x ATR
+      (tr_mode 0 = from each bar's high/low, 1 = chandelier from the highest high / lowest low since entry),
+      time exit after max_bars bars (filled at the next open).
+    - carry_l / carry_s: holding cost per bar (funding / swap), charged at bar close on the open size."""
     n = end - start
     eq_arr = np.empty(n if want_equity else 1)
     tr_ent = np.empty(n, np.int64); tr_ex = np.empty(n, np.int64); tr_dir = np.empty(n, np.int64)
     tr_ep = np.empty(n); tr_xp = np.empty(n); tr_ret = np.empty(n); tr_reason = np.empty(n, np.int64)
     tr_amb = np.zeros(n, np.int64); tr_sl = np.empty(n); tr_tp = np.empty(n); tr_carry = np.zeros(n)
+    tr_p1b = np.full(n, -1, np.int64); tr_p1p = np.full(n, np.nan)
     nt = 0
-    pos = 0; ep = 0.0; ei = 0; stop = np.nan; tp = np.nan; acc = 0.0
+    pos = 0; ep = 0.0; ei = 0; stop = np.nan; tp = np.nan; tp1 = np.nan; bel = np.nan; acc = 0.0
+    q = 1.0; real = 0.0; p1b = -1; p1p = np.nan; hh = -np.inf; ll = np.inf; be_done = False
     eq = 1.0; peak = 1.0; maxdd = 0.0
     if want_equity:
         eq_arr[0] = 1.0
     for i in range(start + 1, end):
         j = i - 1
-        # ---- 1) orders from the previous bar's close, filled at this bar's open
         new_dir = 0
         exit_now = False
+        xr = 0
+        timeup = max_bars > 0 and pos != 0 and (j - ei + 1) >= max_bars
         if pos == 1:
             if allow_short and se[j]:
                 exit_now = True; new_dir = -1
             elif lx[j]:
                 exit_now = True
+            elif timeup:
+                exit_now = True; xr = 4
         elif pos == -1:
             if allow_long and le[j]:
                 exit_now = True; new_dir = 1
             elif sx[j]:
                 exit_now = True
+            elif timeup:
+                exit_now = True; xr = 4
         else:
             if allow_long and le[j]:
                 new_dir = 1
@@ -272,63 +323,81 @@ def simulate(o, h, l, c, atr, le, lx, se, sx, start, end, allow_long, allow_shor
                 new_dir = -1
         if exit_now:
             px = o[i]
-            if pos == 1:
-                r = (px * (1 - cost_frac) - cost_abs - (ep * (1 + cost_frac) + cost_abs)) / ep
-            else:
-                r = ((ep * (1 - cost_frac) - cost_abs) - (px * (1 + cost_frac) + cost_abs)) / ep
-            r = (r - acc) * lev
+            r = (real + q * _rr(pos, ep, px, cost_frac, cost_abs) - acc) * lev
             eq *= (1 + r)
-            tr_ent[nt] = ei; tr_ex[nt] = i; tr_dir[nt] = pos; tr_ep[nt] = ep; tr_xp[nt] = px; tr_ret[nt] = r; tr_reason[nt] = 0
-            tr_sl[nt] = stop; tr_tp[nt] = tp; tr_carry[nt] = acc
+            tr_ent[nt] = ei; tr_ex[nt] = i; tr_dir[nt] = pos; tr_ep[nt] = ep; tr_xp[nt] = px; tr_ret[nt] = r; tr_reason[nt] = xr
+            tr_sl[nt] = stop; tr_tp[nt] = tp; tr_carry[nt] = acc; tr_p1b[nt] = p1b; tr_p1p[nt] = p1p
             nt += 1
             pos = 0
-        if new_dir != 0 and not np.isnan(atr[j]):
-            pos = new_dir; ep = o[i]; ei = i; acc = 0.0
-            stop = c[j] - pos * sl_k * atr[j]
-            tp = c[j] + pos * tp_k * atr[j] if tp_k > 0 else np.nan
-        # ---- 2) intrabar stop / target
+        if new_dir != 0 and not np.isnan(atr[j]) and not np.isnan(unit[j]):
+            pos = new_dir; ep = o[i]; ei = i; acc = 0.0; q = 1.0; real = 0.0; p1b = -1; p1p = np.nan
+            hh = -np.inf; ll = np.inf; be_done = False
+            u = unit[j]
+            stop = c[j] - pos * sl_k * u
+            tp = c[j] + pos * tp_k * u if tp_k > 0 else np.nan
+            tp1 = c[j] + pos * tp1_k * u if tp1_k > 0 else np.nan
+            bel = c[j] + pos * be_k * u if be_k > 0 else np.nan
+        # ---- 2) intrabar stop / partial target / final target
         if pos != 0:
-            hit = False; px = 0.0; reason = 0; amb = 0
             if pos == 1:
                 hs = l[i] <= stop
+                h1 = p1b < 0 and tp1_k > 0 and h[i] >= tp1
                 ht = tp_k > 0 and h[i] >= tp
-                if hs and ht and o[i] > stop:
-                    amb = 1
-                if hs and not (amb == 1 and resolve[i] == 1):
-                    hit = True; px = min(o[i], stop); reason = 1
-                elif ht:
-                    hit = True; px = max(o[i], tp); reason = 2
+                gap = o[i] <= stop
             else:
                 hs = h[i] >= stop
+                h1 = p1b < 0 and tp1_k > 0 and l[i] <= tp1
                 ht = tp_k > 0 and l[i] <= tp
-                if hs and ht and o[i] < stop:
-                    amb = 1
-                if hs and not (amb == 1 and resolve[i] == 1):
-                    hit = True; px = max(o[i], stop); reason = 1
-                elif ht:
-                    hit = True; px = min(o[i], tp); reason = 2
-            if hit:
-                if pos == 1:
-                    r = (px * (1 - cost_frac) - cost_abs - (ep * (1 + cost_frac) + cost_abs)) / ep
-                else:
-                    r = ((ep * (1 - cost_frac) - cost_abs) - (px * (1 + cost_frac) + cost_abs)) / ep
-                r = (r - acc) * lev
+                gap = o[i] >= stop
+            amb = 1 if (hs and (h1 or ht) and not gap) else 0
+            targets_first = amb == 1 and resolve[i] == 1
+            closed = False
+            reason = 0; px = 0.0
+            if hs and not targets_first:
+                px = min(o[i], stop) if pos == 1 else max(o[i], stop)
+                reason = 1; closed = True
+            else:
+                if h1:
+                    p1p = max(o[i], tp1) if pos == 1 else min(o[i], tp1)
+                    real += tp1_frac * _rr(pos, ep, p1p, cost_frac, cost_abs)
+                    q = 1.0 - tp1_frac; p1b = i
+                if ht:
+                    px = max(o[i], tp) if pos == 1 else min(o[i], tp)
+                    reason = 2; closed = True
+                elif hs:
+                    px = stop
+                    reason = 1; closed = True
+            if closed:
+                r = (real + q * _rr(pos, ep, px, cost_frac, cost_abs) - acc) * lev
                 eq *= (1 + r)
                 tr_ent[nt] = ei; tr_ex[nt] = i; tr_dir[nt] = pos; tr_ep[nt] = ep; tr_xp[nt] = px; tr_ret[nt] = r; tr_reason[nt] = reason
-                tr_amb[nt] = amb; tr_sl[nt] = stop; tr_tp[nt] = tp; tr_carry[nt] = acc
+                tr_amb[nt] = amb; tr_sl[nt] = stop; tr_tp[nt] = tp1 if (tp1_k > 0 and (p1b < 0 or p1b == i)) else tp
+                tr_carry[nt] = acc; tr_p1b[nt] = p1b; tr_p1p[nt] = p1p
                 nt += 1
                 pos = 0
-        # ---- 3) bar close: carry, mark-to-market equity, drawdown, trailing update
+        # ---- 3) bar close: carry, mark-to-market, trailing, breakeven
         if pos == 1:
-            acc += carry_l[i]
-            m = eq * (1 + lev * ((c[i] * (1 - cost_frac) - cost_abs - (ep * (1 + cost_frac) + cost_abs)) / ep - acc))
+            acc += carry_l[i] * q
+            m = eq * (1 + lev * (real + q * _rr(1, ep, c[i], cost_frac, cost_abs) - acc))
+            hh = max(hh, h[i])
             if tr_k > 0 and not np.isnan(atr[i]):
-                stop = max(stop, h[i] - tr_k * atr[i])
+                if tr_mode == 1:
+                    stop = max(stop, hh - tr_k * atr[i])
+                else:
+                    stop = max(stop, h[i] - tr_k * atr[i])
+            if be_k > 0 and not be_done and h[i] >= bel:
+                stop = max(stop, ep); be_done = True
         elif pos == -1:
-            acc += carry_s[i]
-            m = eq * (1 + lev * (((ep * (1 - cost_frac) - cost_abs) - (c[i] * (1 + cost_frac) + cost_abs)) / ep - acc))
+            acc += carry_s[i] * q
+            m = eq * (1 + lev * (real + q * _rr(-1, ep, c[i], cost_frac, cost_abs) - acc))
+            ll = min(ll, l[i])
             if tr_k > 0 and not np.isnan(atr[i]):
-                stop = min(stop, l[i] + tr_k * atr[i])
+                if tr_mode == 1:
+                    stop = min(stop, ll + tr_k * atr[i])
+                else:
+                    stop = min(stop, l[i] + tr_k * atr[i])
+            if be_k > 0 and not be_done and l[i] <= bel:
+                stop = min(stop, ep); be_done = True
         else:
             m = eq
         if m > peak:
@@ -340,17 +409,13 @@ def simulate(o, h, l, c, atr, le, lx, se, sx, start, end, allow_long, allow_shor
             eq_arr[i - start] = m
     if pos != 0:  # close open trade at last close
         i = end - 1; px = c[i]
-        if pos == 1:
-            r = (px * (1 - cost_frac) - cost_abs - (ep * (1 + cost_frac) + cost_abs)) / ep
-        else:
-            r = ((ep * (1 - cost_frac) - cost_abs) - (px * (1 + cost_frac) + cost_abs)) / ep
-        r = (r - acc) * lev
+        r = (real + q * _rr(pos, ep, px, cost_frac, cost_abs) - acc) * lev
         eq *= (1 + r)
         tr_ent[nt] = ei; tr_ex[nt] = i; tr_dir[nt] = pos; tr_ep[nt] = ep; tr_xp[nt] = px; tr_ret[nt] = r; tr_reason[nt] = 3
-        tr_sl[nt] = stop; tr_tp[nt] = tp; tr_carry[nt] = acc
+        tr_sl[nt] = stop; tr_tp[nt] = tp; tr_carry[nt] = acc; tr_p1b[nt] = p1b; tr_p1p[nt] = p1p
         nt += 1
     return (eq, maxdd, nt, tr_ent[:nt], tr_ex[:nt], tr_dir[:nt], tr_ep[:nt], tr_xp[:nt], tr_ret[:nt], tr_reason[:nt], eq_arr,
-            tr_amb[:nt], tr_sl[:nt], tr_tp[:nt], tr_carry[:nt])
+            tr_amb[:nt], tr_sl[:nt], tr_tp[:nt], tr_carry[:nt], tr_p1b[:nt], tr_p1p[:nt])
 
 
 def metrics(rets, eq, maxdd):
@@ -383,13 +448,15 @@ def sharpe(dr):
 
 def run(fam, p, cc, start, end, direction, cost_frac, cost_abs, want_equity=False, sig=None, lev=1.0, daily=False):
     le, lx, se, sx, _ = sig if sig is not None else signals(fam, p, cc)
-    res = simulate(cc.o, cc.h, cc.l, cc.c, cc.atr, le, lx, se, sx, int(start), int(end),
+    unit, sl, tp, trk, trm, tp1, tp1f, be, mb = exit_args(p, cc)
+    res = simulate(cc.o, cc.h, cc.l, cc.c, cc.atr, unit, le, lx, se, sx, int(start), int(end),
                    direction in ("long", "both"), direction in ("short", "both"),
-                   float(p["sl_atr"]), float(p["tp_atr"]), float(p["trail_atr"]), float(cost_frac), float(cost_abs),
+                   sl, tp, trk, trm, tp1, tp1f, be, mb, float(cost_frac), float(cost_abs),
                    want_equity or daily, float(lev), cc.carry_long, cc.carry_short, cc.resolve)
-    eq, maxdd, nt, ent, ex, dr, ep, xp, ret, reason, eqa, amb, sl, tp, carry = res
+    eq, maxdd, nt, ent, ex, dr, ep, xp, ret, reason, eqa, amb, sl_, tp_, carry, p1b, p1p = res
     m = metrics(ret, eq, maxdd)
-    tr = dict(ent=ent, ex=ex, dir=dr, ep=ep, xp=xp, ret=ret, reason=reason, equity=eqa, amb=amb, sl=sl, tp=tp, carry=carry)
+    tr = dict(ent=ent, ex=ex, dir=dr, ep=ep, xp=xp, ret=ret, reason=reason, equity=eqa, amb=amb, sl=sl_, tp=tp_, carry=carry,
+              p1b=p1b, p1p=p1p)
     if daily:
         d = daily_returns(cc, start, end, eqa)
         tr["daily"] = d
@@ -413,6 +480,8 @@ def wf_consistency(tr, start, end, k):
 
 
 def neighbours(fam, p):
+    """Nearby parameter sets (each number nudged ~15%, stop/target nudged) used for the stability check."""
+    p = full_params(p)
     out = []
     for k, v in FAMILIES[fam]["space"].items():
         if isinstance(v, tuple):
@@ -422,19 +491,21 @@ def neighbours(fam, p):
                     nv = p[k] + (1 if f > 1 else -1)
                 q[k] = max(2, nv)
                 out.append(q)
-    for k in ("sl_atr",):
-        for d in (-0.5, 0.5):
-            q = dict(p); q[k] = max(0.5, p[k] + d); out.append(q)
-    if p["tp_atr"] > 0:
-        for d in (-0.5, 0.5):
-            q = dict(p); q["tp_atr"] = max(0.5, p["tp_atr"] + d); out.append(q)
+    sk, tk, step = ("sl_pct", "tp_pct", 0.25) if p["sl_mode"] == 1 else ("sl_atr", "tp_atr", 0.5)
+    for d in (-1, 1):
+        q = dict(p); q[sk] = max(step, p[sk] + d * step * max(1, p[sk] // 2)); out.append(q)
+    if p[tk] > 0:
+        for d in (-1, 1):
+            q = dict(p); q[tk] = max(step, p[tk] + d * step * max(1, p[tk] // 2)); out.append(q)
     return out
 
 
 def stability(fam, p, cc, start, end, direction, cf, ca, lev=1.0):
     pfs = []
     for q in neighbours(fam, p):
-        if fam in ("ma_cross", "macd") and q["fast"] >= q["slow"]:
+        if fam in ("ma_cross", "macd", "ma2") and q["fast"] >= q["slow"]:
+            continue
+        if fam in ("donchian", "vol_bo") and q["exit_len"] > q["entry_len"]:
             continue
         m, _ = run(fam, q, cc, start, end, direction, cf, ca, lev=lev)
         pfs.append(m["pf"] if m["trades"] >= 5 else 0)
@@ -470,7 +541,8 @@ def monte_carlo(rets, runs=1000, method="bootstrap", seed=7, skip=0.1):
 # ------------------------------------------------------------------ search
 def search(df, cfg, progress=None, cc=None):
     """cfg: families, n_variants, time_budget, direction, oos_pct, folds, cost_frac, cost_abs,
-    min_pf, min_wr, max_dd, min_trades, min_wf, min_stab, oos_min_pf, seed"""
+    min_pf, min_wr, max_dd, min_trades, min_wf, min_stab, oos_min_pf, seed,
+    mode ("ketat" | "vela"), algo ("random" | "evo"), combo (bool)."""
     t0 = time.time()
     cc = cc if cc is not None else Cache(df)
     n = len(df)
@@ -478,25 +550,39 @@ def search(df, cfg, progress=None, cc=None):
     warm = 260  # bars of indicator warm-up
     is_start = min(warm, split // 4)
     rng = np.random.default_rng(cfg.get("seed", 42))
-    fams = cfg["families"]
-    rows = []
-    seen = set()
-    near = []
+    tf_min = cfg.get("tf_min", cc.tf_min)
+    combo = bool(cfg.get("combo", False))
+    mode = cfg.get("mode", "ketat")
+    algo = cfg.get("algo", "random")
+    fams = allowed_families(cfg["families"], tf_min, cc.has_volume)
+    skipped_fams = [f for f in cfg["families"] if f not in fams]
+    if not fams:
+        raise ValueError("Tidak ada keluarga strategi yang cocok untuk timeframe / data ini.")
+    lev = cfg.get("lev", 1.0)
+    rows, near, seen = [], [], set()
     tested = 0
-    trial_sr = []            # daily Sharpe of EVERY trial (for the Deflated Sharpe Ratio)
+    trial_sr = []            # daily Sharpe of EVERY trial (Deflated Sharpe Ratio counts all of them)
     pbo_keep = cfg.get("pbo_trials", 800)
-    trial_daily = []         # daily returns of the first `pbo_keep` trials (random sample, for PBO / CSCV)
-    for k in range(cfg["n_variants"]):
+    trial_daily = []
+    elite = []               # (score, fam, params) for the evolutionary search
+    warmup = max(200, int(cfg["n_variants"] * 0.25))
+    n_elite = 20
+    k = 0; misses = 0
+    while k < cfg["n_variants"] and misses < 5000:
         if time.time() - t0 > cfg["time_budget"]:
             break
-        fam = fams[k % len(fams)]
-        p = sample_params(fam, rng)
+        if algo == "evo" and tested >= warmup and elite and rng.random() < 0.7:
+            _, fam, par = elite[int(rng.integers(0, len(elite)))]
+            p = mutate(fam, par, rng, tf_min, combo)
+        else:
+            fam = fams[k % len(fams)]
+            p = sample_params(fam, rng, tf_min, combo)
         key = (fam, tuple(sorted(p.items())))
         if key in seen:
+            misses += 1
             continue
-        seen.add(key)
-        m, tr = run(fam, p, cc, is_start, split, cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], lev=cfg.get("lev", 1.0),
-                    daily=True)
+        seen.add(key); k += 1
+        m, tr = run(fam, p, cc, is_start, split, cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], lev=lev, daily=True)
         tested += 1
         trial_sr.append(m["sharpe_d"])
         if len(trial_daily) < pbo_keep:
@@ -508,27 +594,54 @@ def search(df, cfg, progress=None, cc=None):
             rows.append(dict(fam=fam, params=p, is_m=m, wf=wf, is_pass=True))
         elif m["trades"] >= cfg["min_trades"] and m["net"] > 0:
             near.append(dict(fam=fam, params=p, is_m=m, wf=wf, is_pass=False))
+        if algo == "evo" and m["trades"] >= cfg["min_trades"] and m["net"] > 0:
+            # fitness on in-sample data only (OOS never feeds the search)
+            score = m["ret_dd"] * min(1.0, m["pf"] / max(cfg["min_pf"], 1e-9))
+            if len(elite) < n_elite or score > elite[-1][0]:
+                elite.append((score, fam, p))
+                elite.sort(key=lambda e: e[0], reverse=True)
+                del elite[n_elite:]
         if progress and k % 25 == 0:
-            progress(k / cfg["n_variants"], tested, len(rows))
+            progress(min(1.0, k / cfg["n_variants"]), tested, len(rows))
     t_search = time.time() - t0
-    # ---- stage 2: robustness on the best in-sample candidates (ranked by IS return/DD only)
     rows.sort(key=lambda r: r["is_m"]["ret_dd"], reverse=True)
     n_is_pass = len(rows)
-    rows = rows[: cfg.get("max_deep", 150)]
+    # diversity: max 3 variants with the same signal settings (differing only in exits/filters) go to stage 2,
+    # so the evolutionary search cannot fill the list with near-copies
+    max_deep = cfg.get("max_deep", 300 if mode == "vela" else 150)
+    keep, cnt = [], {}
+    for r in rows:
+        ck = (r["fam"], tuple((k, r["params"][k]) for k in FAMILIES[r["fam"]]["space"]))
+        if cnt.get(ck, 0) >= 3:
+            continue
+        cnt[ck] = cnt.get(ck, 0) + 1
+        keep.append(r)
+        if len(keep) >= max_deep:
+            break
+    rows = keep
     near.sort(key=lambda r: r["is_m"]["ret_dd"], reverse=True)
-    rows += near[: max(0, 20 - len(rows))]  # show 'near misses' (clearly flagged) when few pass
+    rows += near[: max(0, 20 - len(rows))]
     out = []
     for r in rows:
-        stab, stab_pf = stability(r["fam"], r["params"], cc, is_start, split, cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], lev=cfg.get("lev", 1.0))
-        om, _ = run(r["fam"], r["params"], cc, split, n, cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], lev=cfg.get("lev", 1.0))
+        if time.time() - t0 > cfg["time_budget"] * 2.5 and out:
+            break   # hard time cap on stage 2 (cloud)
+        om, _ = run(r["fam"], r["params"], cc, split, n, cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], lev=lev)
         ism = r["is_m"]
-        oos_ok = om["pf"] >= cfg["oos_min_pf"] and om["maxdd"] <= cfg["max_dd"] and om["trades"] >= max(3, cfg["min_trades"] * cfg["oos_pct"] / max(1, 100 - cfg["oos_pct"]) * 0.3)
-        overfit = (om["trades"] > 0 and om["pf"] < 0.6 * ism["pf"]) or om["net"] < 0
-        passed = r["is_pass"] and oos_ok and r["wf"] >= cfg["min_wf"] and stab >= cfg["min_stab"] and not overfit
+        min_oos_tr = max(3, cfg["min_trades"] * cfg["oos_pct"] / max(1, 100 - cfg["oos_pct"]) * 0.3)
+        oos_ok = om["pf"] >= cfg["oos_min_pf"] and om["maxdd"] <= cfg["max_dd"] and om["trades"] >= min_oos_tr
+        if mode == "vela":
+            stab, stab_pf, overfit = float("nan"), float("nan"), False
+            passed = r["is_pass"] and oos_ok
+        else:
+            stab, stab_pf = stability(r["fam"], r["params"], cc, is_start, split, cfg["direction"], cfg["cost_frac"],
+                                      cfg["cost_abs"], lev=lev)
+            overfit = (om["trades"] > 0 and om["pf"] < 0.6 * ism["pf"]) or om["net"] < 0
+            passed = r["is_pass"] and oos_ok and r["wf"] >= cfg["min_wf"] and stab >= cfg["min_stab"] and not overfit
         out.append(dict(fam=r["fam"], params=r["params"], is_m=ism, oos_m=om, wf=r["wf"], stab=stab,
                         stab_pf=stab_pf, overfit=overfit, passed=passed, is_pass=r["is_pass"], oos_ok=oos_ok))
     meta = dict(tested=tested, is_pass=n_is_pass, seconds=time.time() - t0, search_seconds=t_search,
                 split=split, is_start=is_start, n=n, split_time=df.index[split], start_time=df.index[is_start],
-                end_time=df.index[-1], trial_sr=np.array(trial_sr),
+                end_time=df.index[-1], trial_sr=np.array(trial_sr), mode=mode, algo=algo, combo=combo,
+                skipped_families=skipped_fams, n_deep=len(out),
                 trial_daily=np.vstack(trial_daily) if trial_daily else np.zeros((0, 0), np.float32))
     return out, meta, cc
