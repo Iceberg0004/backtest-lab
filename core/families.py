@@ -411,7 +411,8 @@ class _:
             rmf = tp * cc.v
             d = tp - ind.shift(tp)
             with np.errstate(invalid="ignore"):
-                pos = np.where(d > 0, rmf, 0.0); neg = np.where(d < 0, rmf, 0.0)
+                eps = tp * 1e-12        # equal typical prices can differ by 1 float ulp; treat as "no change" (same in Pine)
+                pos = np.where(d > eps, rmf, 0.0); neg = np.where(d < -eps, rmf, 0.0)
             sp, sn = ind.rolling_sum(pos, n), ind.rolling_sum(neg, n)
             with np.errstate(invalid="ignore", divide="ignore"):
                 v = np.where(sn == 0, 100.0, 100 - 100 / (1 + sp / sn))
@@ -423,7 +424,7 @@ class _:
     def pine(p):
         n = p["mfi_len"]
         return ["mfTp = (high + low + close) / 3", "mfRaw = mfTp * volume", "mfD = mfTp - mfTp[1]",
-                "mfPos = mfD > 0 ? mfRaw : 0.0", "mfNeg = mfD < 0 ? mfRaw : 0.0",
+                "mfEps = mfTp * 1e-12", "mfPos = mfD > mfEps ? mfRaw : 0.0", "mfNeg = mfD < -mfEps ? mfRaw : 0.0",
                 f"mfSp = math.sum(mfPos, {n})", f"mfSn = math.sum(mfNeg, {n})",
                 f"mfiV = bar_index < {n} ? na : mfSn == 0 ? 100.0 : 100 - 100 / (1 + mfSp / mfSn)",
                 f"longEntry = ta.crossover(mfiV, {p['mfi_lo']})", "longExit = ta.crossover(mfiV, 50)",
