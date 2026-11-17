@@ -1,7 +1,7 @@
 """Strategy families, bar-by-bar simulator (numba), metrics, search loop,
 walk-forward consistency, parameter stability and Monte Carlo."""
 from __future__ import annotations
-import math, time
+import math, os, time
 import numpy as np
 import pandas as pd
 from numba import njit
@@ -143,10 +143,24 @@ class Cache:
         self.resolve = np.zeros(len(df), np.int8)
         self.pct_unit = self.c * 0.01
 
+    # indicator arrays are cached, but capped in bytes (LRU) so long histories fit in ~1 GB of RAM
+    MAX_BYTES = int(float(os.environ.get("VELA_INDICATOR_CACHE_MB", "100")) * 1e6)
+
     def get(self, key, fn):
-        if key not in self.d:
-            self.d[key] = fn()
-        return self.d[key]
+        d = self.d
+        if key in d:
+            v = d.pop(key)
+            d[key] = v          # mark as recently used
+            return v
+        v = fn()
+        nb = sum(getattr(x, "nbytes", 0) for x in v) if isinstance(v, tuple) else getattr(v, "nbytes", 0)
+        self._bytes = getattr(self, "_bytes", 0) + nb
+        d[key] = v
+        while self._bytes > self.MAX_BYTES and len(d) > 1:
+            k0 = next(iter(d))
+            v0 = d.pop(k0)
+            self._bytes -= sum(getattr(x, "nbytes", 0) for x in v0) if isinstance(v0, tuple) else getattr(v0, "nbytes", 0)
+        return v
 
 
 def _trend(cc, n):
