@@ -8,8 +8,9 @@ Ini bukan produk LuxAlgo dan tidak memakai merek atau kode mereka. Dipakai untuk
 
 | Pasar | Sumber | Catatan |
 |---|---|---|
-| Crypto (BTCUSDT, ETHUSDT, …) | Binance (gratis, realtime) | Riwayat sejak koin listing (BTC sejak Agustus 2017). |
-| Forex & emas (EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, USDCHF, NZDUSD, XAUUSD, …) | **Dukascopy** (default) | Riwayat sejak 2003, dipakai untuk backtest dan data unseen. |
+| Crypto (±80 pair USDT paling ramai) | Binance (gratis, realtime) | Riwayat sejak koin listing (BTC sejak Agustus 2017). |
+| Forex mayor & cross, emas, perak | **Dukascopy** (default) | Riwayat sejak 2003, dipakai untuk backtest dan data unseen. |
+| Indeks (US30, NAS100, SPX500, GER40, UK100, JPN225), WTI, Brent | Dukascopy | Indeks sejak ±2012, minyak sejak ±2011. |
 | Candle yang sedang berjalan untuk forex & emas | biquote.io | Harga live dari broker MT5, jadi bisa beda sedikit dengan Dukascopy. Itu normal. |
 | Cadangan | Yahoo Finance | 1h hanya ±2 tahun, 1m hanya 7 hari. Emas memakai GC=F (futures). |
 | Opsional (pakai API key gratis) | OANDA practice, Twelve Data | Nonaktif sampai kamu mengisi key. Belum diuji karena belum ada key. |
@@ -29,12 +30,16 @@ Rincian sumber ada di [DATA_SOURCES.md](DATA_SOURCES.md). Panduan pemakaian lebi
 - **Tambahan (v2):** Deflated Sharpe Ratio, PBO (CSCV), tes harga acak (bar permutation) untuk strategi dan untuk seluruh pencarian,
   geser parameter, biaya 2x/3x, walk-forward optimisation sungguhan (anchored/rolling, kurva OOS disambung + WFE),
   multi-aset, portofolio strategi berkorelasi rendah, cek urutan SL/TP pakai candle 1 menit, funding Binance dan swap forex,
-  filter ADX, 9 jenis strategi, rapor A–E, simpan/bandingkan strategi lewat JSON. Detail di [README_ID.md](README_ID.md).
+  filter ADX, rapor A–E, simpan/bandingkan strategi lewat JSON. Detail di [README_ID.md](README_ID.md).
+- **v3:** 28 jenis strategi; exit yang ikut dicari (SL ATR/%, TP1 50%, breakeven, trailing ATR/chandelier, keluar setelah N candle,
+  keluar saat sinyal kebalikan); filter konfirmasi (sesi, hari, tren timeframe besar tanpa lookahead, volatilitas, RSI, volume);
+  pencarian Acak atau Evolusi; mode Ketat (default) atau mode Vela (longgar, ada peringatan); tab Scan banyak pasar;
+  ±80 pair Binance USDT, forex cross, indeks (US30, NAS100, SPX500, GER40, UK100, JPN225), WTI/Brent.
 
 ## Tes
 
-- `python tests/e2e_apptest.py binance BTCUSDT` (juga `dukascopy EURUSD carry`, `dukascopy XAUUSD`): klik semua tombol lewat Streamlit AppTest.
-- `tools/pinecheck`: kecocokan Python vs Pine (PineTS) untuk semua jenis strategi.
+- `python tests/e2e_apptest.py binance BTCUSDT carry evo combo scan` (juga `dukascopy EURUSD carry`, `dukascopy XAUUSD evo`, `dukascopy US30 vela combo`): klik semua tombol lewat Streamlit AppTest.
+- `python tools/pinecheck/make_case.py 2 && cd tools/pinecheck && node run_all.mjs`: kecocokan Python vs Pine (PineTS), 63 kasus: semua jenis strategi, filter, dan exit.
 
 ## Menjalankan di komputer sendiri
 
