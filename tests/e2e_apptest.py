@@ -15,7 +15,7 @@ assert not at.exception, at.exception
 at.selectbox(key="source").set_value(source).run()
 at.selectbox(key="symbol").set_value(symbol).run()
 at.selectbox(key="tf").set_value("1h").run()
-at.select_slider(key="n_variants").set_value(2000).run()
+at.select_slider(key="n_variants").set_value(int(os.environ.get("E2E_VARIANTS", "2000"))).run()
 if carry:
     if source == "binance":
         at.checkbox(key="use_funding").check().run()
