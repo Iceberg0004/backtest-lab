@@ -246,7 +246,8 @@ def render_regime(ctx):
         if key not in store:
             store.clear()
             with st.spinner("Mendeteksi regime..."):
-                store[key] = G.detect(cc, ctx["is_start"], ctx["split"], k)
+                from core import isolate
+                store[key] = isolate.run(G.detect, cc, ctx["is_start"], ctx["split"], k)
         lab, names, rows = store[key]
         cc._regime = lab
         _show(pd.DataFrame(rows).set_index("Regime"))
@@ -312,7 +313,8 @@ def render_meta(ctx):
     if st.button("🤖 Latih meta-label", key="ml_meta_run"):
         store.clear()
         with st.spinner("Melatih model..."):
-            store[key] = ml.meta_label(o["fam"], o["params"], cc, ctx["is_start"], ctx["split"], cfg, cfg["direction"], kind=kind)
+            from core import isolate
+            store[key] = isolate.run(ml.meta_label, o["fam"], o["params"], cc, ctx["is_start"], ctx["split"], cfg, cfg["direction"], kind=kind)
         _trim()
     r = store.get(key)
     if not r:
@@ -357,8 +359,9 @@ def render_ml(res, dfc, cc):
         store.clear()
         bar = st.progress(0.0, "Menyiapkan fitur...")
         try:
-            r = ml.ml_search(cc, is_start, split, cfg, pt=pt, sl=sl, H=int(H), kind=kind, direction=direction,
-                             progress=lambda f, t: bar.progress(min(1.0, f), t))
+            from core import isolate
+            r = isolate.run(ml.ml_search, cc, is_start, split, cfg, pt=pt, sl=sl, H=int(H), kind=kind, direction=direction,
+                            progress=lambda f, t: bar.progress(min(1.0, f), t))
             om2, _ = E.run("ma_cross", r["exitp"], cc, split, n, "both", cfg["cost_frac"] * 2, cfg["cost_abs"] * 2, sig=r["signals"], lev=cfg["lev"])
             r["cost2x"] = om2
             r.pop("signals", None); r.pop("is_tr", None)
