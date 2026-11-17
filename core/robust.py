@@ -371,7 +371,7 @@ def portfolio(cands, cc, start, end, split, cfg, max_n=5, max_corr=0.5):
 
 def similarity(cands, cc, start, end, cfg, thr=0.8):
     """Correlation of daily returns (in-sample window given by start/end), a cluster order for the heatmap and
-    groups of near-duplicates (|corr| >= thr, joined transitively). cands ordered by preference."""
+    groups of near-duplicates (corr >= thr with the group's best member). cands ordered by preference."""
     series = {}
     for lab, fam, p in cands:
         _, tr = E.run(fam, p, cc, start, end, cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], lev=cfg.get("lev", 1.0), daily=True)
@@ -382,20 +382,16 @@ def similarity(cands, cc, start, end, cfg, thr=0.8):
     D = pd.DataFrame(series)
     C = D.corr().fillna(0.0)
     labs = list(C.columns)
-    # groups: union-find on |corr| >= thr
-    parent = list(range(len(labs)))
-    def find(i):
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]; i = parent[i]
-        return i
-    A = np.abs(C.to_numpy())
+    # groups: walk in preference order; join the first group whose representative (its best member) has corr >= thr,
+    # else start a new group. No chaining (A~B, B~C does not make A a twin of C); negative correlation is not a twin.
+    Cv = C.to_numpy()
+    reps, groups = [], {}
     for i in range(len(labs)):
-        for j in range(i + 1, len(labs)):
-            if A[i, j] >= thr:
-                parent[find(i)] = find(j)
-    groups = {}
-    for i in range(len(labs)):
-        groups.setdefault(find(i), []).append(labs[i])
+        g = next((r for r in reps if Cv[i, r] >= thr), None)
+        if g is None:
+            reps.append(i); groups[i] = [labs[i]]
+        else:
+            groups[g].append(labs[i])
     groups = sorted(groups.values(), key=lambda g: labs.index(g[0]))
     # heatmap order: groups together, members in preference order
     order = [x for g in groups for x in g]

@@ -79,6 +79,8 @@ for lab in ["▶️ Jalankan tes harga acak", "▶️ Jalankan tes geser paramet
         print("clicked", lab, round(time.time() - t1, 1), "s")
     except AssertionError as e:
         print("SKIP", lab, str(e)[:200])
+        for m in list(at.error) + list(at.warning):
+            print("  page says:", m.value[:300])
 key = f"{res['id']}_{idx}"
 t = at.session_state["tests"][key]
 print("grade", t.get("grade"), "dsr", round(t["dsr"]["dsr"], 4), "N", t["dsr"]["N"], "oos_psr", t.get("oos_psr"))
