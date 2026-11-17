@@ -2,7 +2,7 @@
 import { PineTS } from 'pinets';
 import fs from 'fs';
 const files = fs.readdirSync('.').filter(f => /^case\d+\.json$/.test(f)).sort((a, b) => parseInt(a.slice(4)) - parseInt(b.slice(4)));
-let allOk = true;
+let allOk = true, stratFail = 0, totalAmb = 0;
 for (const f of files) {
   const c = JSON.parse(fs.readFileSync(f));
   const out = { case: f, fam: c.fam, sym: c.sym, py_trades: c.py.ent.length };
@@ -22,19 +22,25 @@ for (const f of files) {
     const s = await new PineTS(c.candles).run(c.strategy);
     const ct = s.strategy.closedtrades;
     const arr = Array.isArray(ct) ? ct : (ct?.data || ct?._trades || Object.values(ct));
-    let same = 0, prices = 0;
-    for (let i = 0; i < Math.min(arr.length, c.py.ent.length); i++) {
-      const t = arr[i];
-      const eb = t.entry_bar_index ?? t.entryBarIndex ?? t.entry_bar, xb = t.exit_bar_index ?? t.exitBarIndex ?? t.exit_bar;
-      const ep = t.entry_price ?? t.entryPrice, xp = t.exit_price ?? t.exitPrice;
-      if (eb === c.py.ent[i] && xb === c.py.ex[i]) same++;
-      if (Math.abs(ep - c.py.ep[i]) / c.py.ep[i] < 1e-9 && Math.abs(xp - c.py.xp[i]) / c.py.xp[i] < 1e-6) prices++;
+    const exp = c.strat_expect;
+    const recs = arr.map(t => [t.entry_bar_index ?? t.entryBarIndex ?? t.entry_bar, t.exit_bar_index ?? t.exitBarIndex ?? t.exit_bar,
+                               t.entry_price ?? t.entryPrice, t.exit_price ?? t.exitPrice]);
+    recs.sort((a, b) => (a[1] - b[1]) || (a[0] - b[0]));
+    let same = 0, prices = 0, firstBad = null, ambDiff = 0;
+    for (let i = 0; i < Math.min(recs.length, exp.length); i++) {
+      const [eb, xb, ep, xp] = recs[i], e = exp[i];
+      const okB = eb === e[0] && xb === e[1], okP = Math.abs(ep - e[2]) / e[2] < 1e-9 && Math.abs(xp - e[3]) / e[3] < 1e-6;
+      if (okB) same++; if (okP) prices++; else if (okB && e[4] === 1) { prices++; ambDiff++; }
+      if ((!okB || (!okP && e[4] !== 1)) && firstBad === null) firstBad = { i, pine: recs[i], py: e };
     }
-    // the last Python trade may be "closed at end of data" while Pine keeps it open
-    const pyClosed = c.py.reason.filter(r => r !== 3).length;
-    Object.assign(out, { strat_closed: arr.length, py_closed: pyClosed, strat_same_bars: same, strat_same_prices: prices });
-    if (!(arr.length === pyClosed && same >= pyClosed && prices >= pyClosed)) allOk = false;
-  } catch (e) { out.strat_error = String(e).slice(0, 300); allOk = false; }
+    Object.assign(out, { strat_closed: recs.length, py_expect: exp.length, strat_same_bars: same, strat_same_prices: prices, strat_first_bad: firstBad, strat_amb_candle_diffs: ambDiff });
+    totalAmb += ambDiff;
+    out.strat_ok = recs.length === exp.length && same === exp.length && prices === exp.length;
+    if (!out.strat_ok) stratFail++;
+  } catch (e) { out.strat_error = String(e).slice(0, 300); stratFail++; }
   console.log(JSON.stringify(out));
 }
-console.log(allOk ? 'ALL PARITY CHECKS PASSED' : 'SOME PARITY CHECKS FAILED');
+console.log(allOk ? 'INDICATOR PARITY PASSED (all cases)' : 'INDICATOR PARITY FAILED');
+console.log(stratFail === 0 ? 'STRATEGY PARITY PASSED (all cases)' : `STRATEGY PARITY: ${stratFail} of ${files.length} cases differ`);
+console.log(`strategy(): ${totalAmb} trade(s) differ only because SL and TP were both touched in one candle (TradingView guesses the order, the app assumes SL first)`);
+console.log(allOk && stratFail === 0 ? 'ALL PARITY CHECKS PASSED' : 'SOME PARITY CHECKS FAILED');
