@@ -14,6 +14,16 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import sys as _sys
+
+# After a git pull, Streamlit re-runs this file but keeps our own modules (core/*, ui_*) imported from the OLD code.
+# If any of them changed on disk, drop them all so the imports below load the new code together.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_LOCAL = {n: m for n, m in list(_sys.modules.items()) if n != "__main__" and getattr(m, "__file__", None)
+          and os.path.abspath(m.__file__).startswith(_HERE + os.sep)}
+if any(getattr(m, "_bt_mtime", None) != os.path.getmtime(m.__file__) for m in _LOCAL.values() if os.path.exists(m.__file__)):
+    for _n in _LOCAL:
+        _sys.modules.pop(_n, None)
 
 from core.data import SOURCES, KEY_SOURCES, closed_only, TF_MINUTES
 from core import engine as E
@@ -22,6 +32,13 @@ from core.prompt import parse
 from core import robust as R, realism as X
 import ui_extra as U
 import ui_v4 as V
+for _m in list(_sys.modules.values()):   # remember the file version each local module was loaded from (see above)
+    _f = getattr(_m, "__file__", None)
+    if _f and os.path.abspath(_f).startswith(_HERE + os.sep) and not hasattr(_m, "_bt_mtime") and os.path.exists(_f):
+        try:
+            _m._bt_mtime = os.path.getmtime(_f)
+        except Exception:
+            pass
 import threading
 
 def _bg_probe():
