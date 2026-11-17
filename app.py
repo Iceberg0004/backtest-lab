@@ -519,6 +519,7 @@ with t_scan:
         st.caption("Urutan: yang punya strategi lolos dulu, lalu DSR (peluang bukan kebetulan) tertinggi, lalu PF data unseen. "
                    "'Strategi terbaik' = yang DSR-nya paling tinggi di antara yang lolos. Ini hasil uji data lama, bukan saran.")
         st.download_button("⬇️ Unduh tabel (CSV)", tbl[show].to_csv(index=False).encode("utf-8"), "scan_pasar.csv", "text/csv")
+        V.render_scan_matrix(ss.scan_rows)
         keys = [r["key"] for r in ss.scan_rows if r.get("key")]
         if keys:
             o1, o2 = st.columns([3, 1])

@@ -58,13 +58,25 @@ def scan_markets(jobs, load_fn, cfg_base, cost_fn, total_budget, progress=None, 
                            lev=cfg.get("lev", 1.0), daily=True)
             o["dsr"] = R.deflated_sharpe(itr["daily"], meta["trial_sr"], n_eff)["dsr"]
         best = max(passed[:20], key=lambda o: (o.get("dsr") or 0, o["oos_m"]["pf"])) if passed else None
+        # grade grid: best listed variant of every family (by in-sample, the unseen part is only the exam)
+        fam_grades = {}
+        for o in out:
+            if o["fam"] in fam_grades:
+                continue
+            if o.get("dsr") is None:
+                _, itr = E.run(o["fam"], o["params"], cc, meta["is_start"], meta["split"], cfg["direction"], cf, ca,
+                               lev=cfg.get("lev", 1.0), daily=True)
+                o["dsr"] = R.deflated_sharpe(itr["daily"], meta["trial_sr"], n_eff)["dsr"]
+            sc, letter, _ = R.grade(dict(oos_pass=bool(o["passed"]), dsr=o["dsr"], pbo=pbo["pbo"] if pbo else None))
+            fam_grades[o["fam"]] = dict(score=sc, letter=letter, oos_pf=o["oos_m"]["pf"], oos_net=o["oos_m"]["net"], passed=bool(o["passed"]))
         key = f"{src}|{sym}|{tf}"
         results[key] = dict(out=out, meta=meta, cfg=cfg, symbol=sym, tf=tf, source=src, id=f"scan_{key}_{time.time():.0f}",
                             start=str(df.index[0].date()), carry_info=None,
                             search_tests=dict(n_eff=n_eff, pbo=pbo))
         row = dict(Pasar=sym, TF=tf, Candle=len(df), Diuji=meta["tested"], **{"Lolos IS": meta["is_pass"], "Lolos tes": len(passed)},
                    Status="✅ ada yang lolos" if passed else "❌ tidak ada yang lolos",
-                   **{"PBO %": (pbo["pbo"] * 100) if pbo else np.nan}, Detik=round(time.time() - t1, 1), key=key)
+                   **{"PBO %": (pbo["pbo"] * 100) if pbo else np.nan}, Detik=round(time.time() - t1, 1), key=key,
+                   fam_grades=fam_grades)
         if best is not None:
             row.update({"Strategi terbaik": E.FAMILIES[best["fam"]]["name"], "IS PF": best["is_m"]["pf"], "OOS PF": best["oos_m"]["pf"],
                         "OOS Net %": best["oos_m"]["net"] * 100, "OOS DD %": best["oos_m"]["maxdd"] * 100,

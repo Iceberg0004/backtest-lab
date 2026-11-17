@@ -539,3 +539,34 @@ def render_sensitivity(ctx):
     st.plotly_chart(_lay(f, f"{per}: {dict(pf='Profit factor (dipotong di 5)', net='Net %', ret_dd='Return/DD')[metric]}", 460), width='stretch')
     good = np.nanmean(Z > mid) if np.isfinite(Z).any() else 0
     st.caption(f"{good * 100:.0f}% kombinasi di peta ini {'untung' if metric != 'pf' else 'PF > 1'}. Kotak kosong = kurang dari 5 trade.")
+
+
+# ================================================================== multi-timeframe scan matrix
+def render_scan_matrix(rows):
+    rows = [r for r in rows if r.get("fam_grades")]
+    if not rows:
+        return
+    st.markdown("#### 🧮 Matriks rapor (pasar × timeframe × strategi)")
+    st.caption("Nilai = rapor singkat 0-100 (lolos tes ketat versi dasar, Deflated Sharpe, PBO) dari variasi terbaik in-sample tiap jenis "
+               "strategi. Semakin hijau semakin kuat. Ini versi cepat; rapor lengkap ada setelah dibuka di 'Hasil & Detail'.")
+    mk = sorted({r["Pasar"] for r in rows}); tfs = [t for t in ["5m", "15m", "30m", "1h", "2h", "4h", "1d"] if any(r["TF"] == t for r in rows)]
+    Z = np.full((len(mk), len(tfs)), np.nan); T = np.full(Z.shape, "", object)
+    for r in rows:
+        best = max(r["fam_grades"].items(), key=lambda kv: kv[1]["score"] or 0)
+        i, j = mk.index(r["Pasar"]), tfs.index(r["TF"])
+        Z[i, j] = best[1]["score"]; T[i, j] = f"{best[1]['letter']} · {E.FAMILIES[best[0]]['name'][:22]}"
+    f = go.Figure(go.Heatmap(z=Z, x=tfs, y=mk, text=T, texttemplate="%{text}", colorscale="RdYlGn", zmin=0, zmax=100,
+                             hovertemplate="%{y} %{x}: %{z:.0f}/100<br>%{text}<extra></extra>"))
+    st.plotly_chart(_lay(f, "Strategi terbaik per pasar & timeframe", max(260, 46 * len(mk) + 90)), width='stretch')
+    cols = [f"{r['Pasar']} {r['TF']}" for r in rows]
+    fams = sorted({k for r in rows for k in r["fam_grades"]}, key=lambda k: -np.nanmean([r["fam_grades"].get(k, {}).get("score") or np.nan for r in rows]))
+    Z2 = np.full((len(fams), len(rows)), np.nan); T2 = np.full(Z2.shape, "", object)
+    for j, r in enumerate(rows):
+        for i, k in enumerate(fams):
+            g = r["fam_grades"].get(k)
+            if g:
+                Z2[i, j] = g["score"]; T2[i, j] = g["letter"] + ("✓" if g["passed"] else "")
+    f2 = go.Figure(go.Heatmap(z=Z2, x=cols, y=[E.FAMILIES[k]["name"] for k in fams], text=T2, texttemplate="%{text}", colorscale="RdYlGn",
+                              zmin=0, zmax=100, hovertemplate="%{y}<br>%{x}: %{z:.0f}/100<extra></extra>"))
+    st.plotly_chart(_lay(f2, "Rapor tiap jenis strategi (✓ = lolos tes dasar)", max(320, 22 * len(fams) + 120)), width='stretch')
+    st.caption("Jenis strategi yang hijau di banyak pasar/timeframe lebih bisa dipercaya daripada yang hanya bagus di satu tempat.")
