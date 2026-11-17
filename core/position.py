@@ -660,8 +660,9 @@ def run_mart(p, cc, start, end, cost_frac, cost_abs, lev=10.0, stop_out=0.5, tra
 
 
 def summarize(mode, cc, start, end, eq_c, eq_m, expo, legs, tb, tp_, tr_n, blown, sos):
-    eq_c = pd.Series(eq_c).ffill().fillna(1.0).to_numpy()
-    eq_m = np.fmin(pd.Series(eq_m).fillna(pd.Series(eq_c)).to_numpy(), eq_c)
+    # negative-balance protection (retail brokers / exchanges): the account cannot go below 0
+    eq_c = np.maximum(pd.Series(eq_c).ffill().fillna(1.0).to_numpy(), 0.0)
+    eq_m = np.maximum(np.fmin(pd.Series(eq_m).fillna(pd.Series(eq_c)).to_numpy(), eq_c), 0.0)
     peak = np.maximum.accumulate(np.r_[1.0, eq_c])[1:]
     dd = np.where(peak > 0, 1 - eq_m / peak, 0.0)
     maxdd = float(np.clip(dd.max(), 0, 1)) if len(dd) else 0.0
