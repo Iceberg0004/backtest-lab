@@ -25,10 +25,16 @@ FEATURE_LABELS = {
 }
 
 
+class _F32(dict):
+    """Stores every feature column as float32 right away (keeps peak memory low on long histories)."""
+    def __setitem__(self, k, v):
+        super().__setitem__(k, np.asarray(v, np.float32))
+
+
 def features(cc):
     """(matrix float32 [n, k], names). Every column only uses data up to and including bar i."""
     c, h, l = cc.c, cc.h, cc.l
-    f = {}
+    f = _F32()
     with np.errstate(divide="ignore", invalid="ignore"):
         for k in (1, 3, 6, 12, 24, 48):
             f[f"r{k}"] = c / ind.shift(c, k) - 1
@@ -58,7 +64,9 @@ def features(cc):
         if cc.has_volume:
             f["vrel"] = np.log(np.maximum(cc.v, 1e-12) / np.maximum(ind.sma(cc.v, 20), 1e-12))
     names = list(f)
-    X = np.column_stack([np.asarray(f[k], np.float64) for k in names]).astype(np.float32)
+    X = np.empty((len(c), len(names)), np.float32)
+    for j, k in enumerate(names):
+        X[:, j] = f.pop(k)
     X[~np.isfinite(X)] = np.nan
     return X, names
 
