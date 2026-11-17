@@ -79,17 +79,30 @@ Semua tes berat hanya jalan kalau tombolnya diklik.
 
 Hasil tes kami sendiri (jujur): model ML murni di emas dan BTC 1 jam hanya sedikit lebih baik dari menebak (AUC ±0,52-0,55) dan rugi di data unseen setelah biaya. Meta-label kadang menaikkan profit factor tapi mengurangi jumlah trade dan total untung.
 
+## Baru di v5
+- **📊 Data derivatif crypto (Binance, opsional di sidebar):** funding rate, open interest (OI), rasio long/short (akun dan top trader), dan order flow (volume beli taker dari candle, jadi riwayatnya penuh). Dipakai sebagai filter pencarian (funding ekstrem, arah order flow, OI naik/turun), 3 jenis strategi baru (fade funding ekstrem, divergensi OI vs harga, order flow/CVD), dan fitur ML. Tiap candle hanya memakai data yang sudah ada **sebelum candle itu tutup** (tanpa melihat masa depan).
+  - Sumber: API publik Binance Futures + arsip gratis data.binance.vision. API OI Binance hanya menyimpan ±30 hari, jadi riwayat OI/long-short diambil dari arsip harian (mulai ±Sep 2020). Funding mulai ±Sep 2019.
+  - Data likuidasi historis gratis tidak tersedia (arsipnya kosong), jadi tidak dipakai.
+  - Pengambilan pertama 2-4 menit, lalu disimpan di cache. Kalau Binance diblokir di jaringan, aplikasi tetap jalan tanpa data ini dan memberi tahu.
+  - Strategi yang memakai data derivatif **tidak bisa diekspor ke Pine** (TradingView tidak punya data ini di Pine).
+- **🛰️ Matriks scan:** peta nilai rapor pasar × timeframe dan jenis strategi × pasar/timeframe.
+- **🔗 Kemiripan strategi:** korelasi return harian (in-sample saja), pengelompokan strategi kembar, dan daftar wakil tiap kelompok. Pemilihan portofolio otomatis sekarang juga hanya memakai korelasi in-sample.
+- **💸 Preset biaya broker:** Binance spot / BNB / futures taker / maker, dan akun forex standar / raw-ECN (CONTOH, bukan broker tertentu). Semua angka tetap bisa diubah; spread dan swap disimpan per pasar selama sesi.
+- **Rapor dengan DSR ketat (opsional):** versi buku teks yang menganggap semua variasi benar-benar terpisah. Nilai jadi lebih pelit.
+
+Hasil tes kami sendiri (BTC 1 jam, data unseen ±Feb 2024 sampai sekarang, sudah termasuk biaya): data derivatif **tidak otomatis lebih baik**. Rata-rata strategi yang memakai filter derivatif sedikit lebih baik di unseen, tapi strategi terbaik yang lolos tes tetap strategi tanpa data derivatif. Filter OI paling membantu breakout Donchian; ML dengan fitur derivatif rugi lebih kecil dari ML biasa tapi tetap rugi.
+
 ## Jenis strategi, exit, dan filter
-- **28 jenis strategi:** MA cross, RSI, Donchian, Bollinger squeeze, MACD, Supertrend, Keltner, Stoch RSI pullback, Z-score, Hull/TEMA/KAMA cross, Ichimoku, Parabolic SAR, Heikin-Ashi, CCI, Williams %R, MFI, OBV, breakout + volume, ATR channel, pivot support/resistance, inside bar / NR7, engulfing, opening range breakout (hanya timeframe ≤ 1 jam), Aroon, Vortex, Squeeze Momentum, linear regression channel, divergence RSI.
+- **31 jenis strategi** (3 terakhir khusus data derivatif crypto): MA cross, RSI, Donchian, Bollinger squeeze, MACD, Supertrend, Keltner, Stoch RSI pullback, Z-score, Hull/TEMA/KAMA cross, Ichimoku, Parabolic SAR, Heikin-Ashi, CCI, Williams %R, MFI, OBV, breakout + volume, ATR channel, pivot support/resistance, inside bar / NR7, engulfing, opening range breakout (hanya timeframe ≤ 1 jam), Aroon, Vortex, Squeeze Momentum, linear regression channel, divergence RSI, fade funding ekstrem, divergensi OI, order flow/CVD.
 - **Exit (dicoba otomatis):** stop loss ATR atau %, take profit, ambil untung 50% di TP1, stop pindah ke harga masuk (breakeven) setelah X R, trailing ATR atau chandelier, keluar setelah N candle, keluar hanya saat sinyal kebalikan.
-- **Filter konfirmasi (kalau kombinasi dicentang):** sesi Asia / London / New York / London+NY (jam UTC), hari (tanpa Senin / tanpa Jumat / hari kerja), tren timeframe besar (4 jam / harian, hanya candle besar yang sudah tutup, jadi tanpa "melihat masa depan"), volatilitas tinggi / rendah, RSI di sisi yang sama, volume di atas rata-rata.
+- **Filter konfirmasi (kalau kombinasi dicentang):** sesi Asia / London / New York / London+NY (jam UTC), hari (tanpa Senin / tanpa Jumat / hari kerja), tren timeframe besar (4 jam / harian, hanya candle besar yang sudah tutup, jadi tanpa "melihat masa depan"), volatilitas tinggi / rendah, RSI di sisi yang sama, volume di atas rata-rata, dan (crypto, kalau data derivatif aktif) funding tidak ekstrem, order flow searah, OI naik/turun.
 
 ## Export ke TradingView
 Ada dua file `.pine` (Pine Script v5):
 - **strategy**: menampilkan hasil backtest di TradingView.
 - **indicator**: label Long/Short/TP1/SL/TP/Exit, bisa dipasang alert. Posisinya dihitung sendiri, **sama persis** dengan aplikasi.
 
-Keduanya punya **tabel statistik** di pojok chart (hasil uji aplikasi; versi strategy juga menampilkan hasil TradingView sendiri) dan **alert** untuk sinyal Long/Short/Exit, kena stop loss, kena take profit, dan posisi baru. Semua 28 jenis strategi, semua filter, dan semua jenis exit sudah dicek dengan PineTS (emulator Pine open-source) di 63 kasus: versi indicator sama persis dengan aplikasi. Versi strategy juga sama, kecuali trade yang SL dan TP-nya tersentuh di candle yang sama (TradingView menebak urutannya sendiri).
+Keduanya punya **tabel statistik** di pojok chart (hasil uji aplikasi; versi strategy juga menampilkan hasil TradingView sendiri) dan **alert** untuk sinyal Long/Short/Exit, kena stop loss, kena take profit, dan posisi baru. Semua jenis strategi (kecuali yang memakai data derivatif), semua filter, dan semua jenis exit sudah dicek dengan PineTS (emulator Pine open-source) di 63 kasus: versi indicator sama persis dengan aplikasi. Versi strategy juga sama, kecuali trade yang SL dan TP-nya tersentuh di candle yang sama (TradingView menebak urutannya sendiri).
 
 Caranya: buka TradingView → Pine Editor → tempel kodenya → Add to chart, di simbol dan timeframe yang sama.
 Hasil di TradingView bisa sedikit berbeda karena:
@@ -118,6 +131,7 @@ API key OANDA atau Twelve Data (opsional) diisi di Secrets Streamlit Cloud denga
 
 ## Batasan (penting)
 - **Backtest bukan jaminan untung.** Hasil masa lalu tidak menjamin masa depan.
+- Data derivatif hanya untuk crypto Binance, tanpa data likuidasi. Coverage OI/long-short mulai ±2020.
 - Funding dan swap adalah perkiraan (swap pakai angka yang kamu isi). Likuidasi saat memakai leverage belum dihitung.
 - Skor rapor dan semua tes adalah hasil uji data lama, bukan saran trading.
 - Aturan prop firm di aplikasi hanya contoh, bukan aturan resmi perusahaan mana pun.

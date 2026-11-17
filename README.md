@@ -42,9 +42,13 @@ Rincian sumber ada di [DATA_SOURCES.md](DATA_SOURCES.md). Panduan pemakaian lebi
 - **Position sizing** (fixed, risk % from stop distance, vol target, capped fractional Kelly, compounding on/off) and a **prop-firm challenge simulator** (example rules only; block-bootstrap pass probability).
 - **Analytics** (monthly heatmap, hour/weekday, MAE/MFE, streaks, durations, rolling Sharpe/PF, underwater, buy & hold), **live signal panel** for saved strategies (no auto-trading) and a downloadable **HTML report**.
 
+## v5
+- **Crypto derivatives (Binance, opt-in):** funding, open interest, long/short ratios (archive from data.binance.vision, since ~Sep 2020; the live OI API keeps only ~30 days), taker buy volume from klines (full history). Used as search filters, 3 new families (funding fade, OI divergence, CVD/order flow) and ML features. Each bar uses only observations before its close. No free historical liquidation data, so none. Strategies using derivatives cannot be exported to Pine.
+- **Scan matrix** (market × TF, family × market/TF), **strategy similarity/clusters** (in-sample daily-return correlation), **broker cost presets** (examples, editable, per-market spread/swap memory) and an optional **strict textbook DSR** grade.
+
 ## Tes
 
-- `python tests/e2e_apptest.py binance BTCUSDT carry evo combo scan` (juga `dukascopy EURUSD carry`, `dukascopy XAUUSD evo`, `dukascopy US30 vela combo`): klik semua tombol lewat Streamlit AppTest.
+- `python tests/e2e_apptest.py binance BTCUSDT carry evo combo scan` (plus `deriv`, `strict` flags) (juga `dukascopy EURUSD carry`, `dukascopy XAUUSD evo`, `dukascopy US30 vela combo`): klik semua tombol lewat Streamlit AppTest.
 - `python tools/pinecheck/make_case.py 2 && cd tools/pinecheck && node run_all.mjs`: kecocokan Python vs Pine (PineTS), 63 kasus: semua jenis strategi, filter, dan exit.
 
 ## Menjalankan di komputer sendiri
