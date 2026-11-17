@@ -68,6 +68,17 @@ Semua tes berat hanya jalan kalau tombolnya diklik.
 - **Funding rate** (crypto, seperti perpetual futures) dari riwayat funding Binance, dan **swap** forex/emas dengan angka per tahun yang kamu isi.
 - **Filter kondisi pasar (ADX)** ikut dicari: hanya trading saat trending, hanya saat sideways, atau tanpa filter.
 
+## Fitur lanjutan (v4, semua opsional)
+- **🤖 ML (tab sendiri):** model belajar dari indikator untuk menebak apakah harga lebih dulu menyentuh target atau stop loss (triple-barrier). Validasi silang berurutan dengan jeda (purged/embargo), lalu diuji di data unseen dan diberi rapor (lolos unseen, DSR, biaya 2x). Ada grafik fitur yang paling berpengaruh. Model ML tidak bisa diekspor ke Pine.
+- **🤖 Meta-label (di detail strategi):** model kecil yang memilih sinyal mana dari strategi aturan yang diambil atau dilewati.
+- **🌦️ Regime:** pasar dibagi jadi 2-4 "cuaca" (tenang/ramai, naik/turun) dari volatilitas dan tren. Model hanya belajar dari in-sample. Ada warna regime di chart, hasil per regime, dan pilihan strategi berbeda per regime.
+- **💰 Ukuran posisi & prop firm:** ukuran tetap, risiko % per trade (dari jarak stop loss), target volatilitas, Kelly pecahan (dibatasi), compounding on/off, batas ukuran. Simulasi challenge prop firm dengan aturan CONTOH (target, rugi harian, rugi total) dan peluang lolos dari Monte Carlo.
+- **📐 Analitik:** return bulanan, jam & hari terbaik (WIB), MAE/MFE, kalah beruntun, lama trade, Sharpe & PF bergulir, underwater, perbandingan dengan beli & tahan.
+- **📡 Sinyal Live:** sinyal terbaru strategi yang disimpan (candle tutup dan candle berjalan), posisi terbuka, dan sinyal terakhir. Hanya informasi, tidak ada order otomatis.
+- **📄 Laporan HTML:** di tab Export, satu file berisi chart, metrik, rapor dan kode Pine.
+
+Hasil tes kami sendiri (jujur): model ML murni di emas dan BTC 1 jam hanya sedikit lebih baik dari menebak (AUC ±0,52-0,55) dan rugi di data unseen setelah biaya. Meta-label kadang menaikkan profit factor tapi mengurangi jumlah trade dan total untung.
+
 ## Jenis strategi, exit, dan filter
 - **28 jenis strategi:** MA cross, RSI, Donchian, Bollinger squeeze, MACD, Supertrend, Keltner, Stoch RSI pullback, Z-score, Hull/TEMA/KAMA cross, Ichimoku, Parabolic SAR, Heikin-Ashi, CCI, Williams %R, MFI, OBV, breakout + volume, ATR channel, pivot support/resistance, inside bar / NR7, engulfing, opening range breakout (hanya timeframe ≤ 1 jam), Aroon, Vortex, Squeeze Momentum, linear regression channel, divergence RSI.
 - **Exit (dicoba otomatis):** stop loss ATR atau %, take profit, ambil untung 50% di TP1, stop pindah ke harga masuk (breakeven) setelah X R, trailing ATR atau chandelier, keluar setelah N candle, keluar hanya saat sinyal kebalikan.
@@ -109,6 +120,7 @@ API key OANDA atau Twelve Data (opsional) diisi di Secrets Streamlit Cloud denga
 - **Backtest bukan jaminan untung.** Hasil masa lalu tidak menjamin masa depan.
 - Funding dan swap adalah perkiraan (swap pakai angka yang kamu isi). Likuidasi saat memakai leverage belum dihitung.
 - Skor rapor dan semua tes adalah hasil uji data lama, bukan saran trading.
+- Aturan prop firm di aplikasi hanya contoh, bukan aturan resmi perusahaan mana pun.
 - Harga Dukascopy adalah BID. Spread ditambahkan lewat pengaturan spread (pip).
 - Data gratis bisa sesekali error atau terlambat. Kalau itu terjadi, klik ulang atau tunggu sebentar.
 - Data Dukascopy hanya untuk pemakaian pribadi non-komersial (sesuai ketentuan mereka). Jangan dibagikan ulang.

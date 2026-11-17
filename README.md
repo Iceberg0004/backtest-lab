@@ -36,6 +36,12 @@ Rincian sumber ada di [DATA_SOURCES.md](DATA_SOURCES.md). Panduan pemakaian lebi
   pencarian Acak atau Evolusi; mode Ketat (default) atau mode Vela (longgar, ada peringatan); tab Scan banyak pasar;
   ±80 pair Binance USDT, forex cross, indeks (US30, NAS100, SPX500, GER40, UK100, JPN225), WTI/Brent.
 
+## Advanced (v4, all opt-in)
+- **ML tab:** indicator features, triple-barrier labels, purged/embargoed walk-forward CV, OOS test with the same grade, permutation feature importance (scikit-learn HistGradientBoosting or logistic regression, imported lazily). No Pine export.
+- **Meta-labeling** filter for any rule strategy; **regime detection** (k-means on causal vol/trend features, fitted in-sample) with per-regime strategy switcher.
+- **Position sizing** (fixed, risk % from stop distance, vol target, capped fractional Kelly, compounding on/off) and a **prop-firm challenge simulator** (example rules only; block-bootstrap pass probability).
+- **Analytics** (monthly heatmap, hour/weekday, MAE/MFE, streaks, durations, rolling Sharpe/PF, underwater, buy & hold), **live signal panel** for saved strategies (no auto-trading) and a downloadable **HTML report**.
+
 ## Tes
 
 - `python tests/e2e_apptest.py binance BTCUSDT carry evo combo scan` (juga `dukascopy EURUSD carry`, `dukascopy XAUUSD evo`, `dukascopy US30 vela combo`): klik semua tombol lewat Streamlit AppTest.
