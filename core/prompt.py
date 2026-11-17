@@ -5,8 +5,14 @@ import re
 SYM = [(r"\b(btc|bitcoin)\b", "binance", "BTCUSDT"), (r"\b(eth|ethereum)\b", "binance", "ETHUSDT"),
        (r"\b(sol|solana)\b", "binance", "SOLUSDT"), (r"\bbnb\b", "binance", "BNBUSDT"), (r"\bxrp\b", "binance", "XRPUSDT"),
        (r"\b(doge)\b", "binance", "DOGEUSDT"),
-       (r"\b(xau|xauusd|gold|emas)\b", "dukascopy", "XAUUSD")]
-FX = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD"]
+       (r"\b(xau|xauusd|gold|emas)\b", "dukascopy", "XAUUSD"), (r"\b(xag|xagusd|silver|perak)\b", "dukascopy", "XAGUSD"),
+       (r"\b(us30|dow|dow\s*jones)\b", "dukascopy", "US30"), (r"\b(nas100|nasdaq|us100|ustec)\b", "dukascopy", "NAS100"),
+       (r"\b(spx500|s&p|sp500|us500)\b", "dukascopy", "SPX500"), (r"\b(ger40|dax|de40)\b", "dukascopy", "GER40"),
+       (r"\b(uk100|ftse)\b", "dukascopy", "UK100"), (r"\b(jpn225|nikkei|jp225)\b", "dukascopy", "JPN225"),
+       (r"\b(wti|oil|minyak|usoil)\b", "dukascopy", "WTI"), (r"\b(brent|ukoil)\b", "dukascopy", "BRENT")]
+FX = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD", "EURJPY", "GBPJPY", "EURGBP", "EURAUD", "EURCAD",
+      "EURCHF", "EURNZD", "GBPAUD", "GBPCAD", "GBPCHF", "GBPNZD", "AUDJPY", "AUDCAD", "AUDCHF", "AUDNZD", "CADJPY", "CHFJPY",
+      "NZDJPY", "NZDCAD", "CADCHF"]
 
 
 def _num(s):
@@ -45,11 +51,15 @@ def parse(text: str) -> dict:
     elif re.search(r"short\s*only|hanya\s*short|cuma\s*short|only\s*short", t):
         out["direction"] = "short"
     fams = []
-    if re.search(r"trend|tren|\bema\b|\bsma\b|moving", t): fams.append("ma_cross")
-    if re.search(r"mean\s*rev|rsi|reversal|jenuh", t): fams.append("rsi_mr")
-    if re.search(r"breakout|donchian|tembus", t): fams.append("donchian")
-    if re.search(r"squeeze|bollinger|kompresi|volatil", t): fams.append("bb_squeeze")
-    if re.search(r"macd|momentum", t): fams.append("macd")
+    if re.search(r"trend|tren|\bema\b|\bsma\b|moving", t): fams += ["ma_cross", "supertrend", "ma2", "ichimoku", "psar", "aroon"]
+    if re.search(r"mean\s*rev|rsi|reversal|jenuh", t): fams += ["rsi_mr", "zscore", "willr", "cci", "stochrsi"]
+    if re.search(r"breakout|donchian|tembus", t): fams += ["donchian", "keltner", "atr_ch", "vol_bo", "nr7", "orb", "pivot"]
+    if re.search(r"squeeze|bollinger|kompresi|volatil", t): fams += ["bb_squeeze", "sqz"]
+    if re.search(r"macd|momentum", t): fams += ["macd", "vortex", "obv", "mfi"]
+    if re.search(r"ichimoku", t): fams.append("ichimoku")
+    if re.search(r"divergen", t): fams.append("rsi_div")
+    if re.search(r"engulf|candle\s*pattern|pola\s*candle|heikin", t): fams += ["engulf", "heikin", "nr7"]
+    fams = list(dict.fromkeys(fams))
     if fams:
         out["families"] = fams
     return out

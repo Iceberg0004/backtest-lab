@@ -99,8 +99,51 @@ class BinanceSource(DataSource):
     _hosts_resolved = None  # list of hosts that responded, then the rest as last resort
     LISTING = pd.Timestamp("2017-08-17", tz="UTC")
 
-    def symbols(self):
-        return ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "PAXGUSDT"]
+    FALLBACK = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "PAXGUSDT", "TRXUSDT", "LINKUSDT",
+                "AVAXUSDT", "DOTUSDT", "LTCUSDT", "BCHUSDT", "SUIUSDT", "NEARUSDT", "APTUSDT", "ARBUSDT", "OPUSDT", "UNIUSDT",
+                "ATOMUSDT", "ETCUSDT", "FILUSDT", "XLMUSDT", "HBARUSDT", "AAVEUSDT", "INJUSDT", "TONUSDT", "PEPEUSDT", "SHIBUSDT"]
+    _STABLE = {"USDC", "FDUSD", "TUSD", "BUSD", "USDP", "DAI", "EUR", "AEUR", "USDE", "XUSD", "RLUSD", "USD1", "BFUSD", "U", "RWUSD",
+               "EURI", "PYUSD", "USDS", "GBP", "TRY", "BRL"}
+    _sym_cache = [0.0, None]
+
+    def symbols(self, top=80):
+        """Most traded Binance USDT pairs (24h quote volume), refreshed every 6 hours; fixed list if offline."""
+        now = time.time()
+        if self._sym_cache[1] and now - self._sym_cache[0] < 6 * 3600:
+            return self._sym_cache[1]
+        out = None
+        try:
+            r = requests.get("https://data-api.binance.vision/api/v3/ticker/24hr", params={"type": "MINI"}, timeout=8, headers=self._UA)
+            if r.status_code == 200:
+                rows = []
+                for d in r.json():
+                    sym = d.get("symbol", "")
+                    if not sym.endswith("USDT") or not sym.isascii() or not sym.isalnum():
+                        continue
+                    base = sym[:-4]
+                    if base in self._STABLE or base.endswith(("UP", "DOWN", "BULL", "BEAR")):
+                        continue
+                    if base.endswith("B") and base not in ("BNB", "ARB", "TRB"):
+                        continue  # tokenized stocks (NVDAB, MUB, INTCB...): short history, stock-market hours
+                    try:
+                        qv = float(d.get("quoteVolume") or 0)
+                        if float(d.get("closeTime") or 0) < (now - 3 * 86400) * 1000:
+                            continue  # delisted / halted
+                    except ValueError:
+                        continue
+                    rows.append((qv, sym))
+                rows.sort(reverse=True)
+                out = [s_ for _, s_ in rows[:top]]
+                for s_ in self.FALLBACK[:8]:       # keep the classics on top
+                    if s_ in out:
+                        out.remove(s_)
+                out = self.FALLBACK[:8] + out
+        except Exception as e:
+            print(f"[data] Binance symbol list failed: {type(e).__name__}: {e}", flush=True)
+        if not out:
+            return self.FALLBACK
+        self._sym_cache[:] = [now, out]
+        return out
 
     def limits_note(self, tf):
         return ("Binance: riwayat lengkap sejak koin listing (BTC sejak Agustus 2017) untuk semua timeframe. "
@@ -215,6 +258,8 @@ YF_INTERVAL = {"1m": ("1m", "7d"), "5m": ("5m", "60d"), "15m": ("15m", "60d"), "
 
 def pip_size_for(symbol: str):
     s = symbol.upper()
+    if s in POINT_SIZE:
+        return POINT_SIZE[s]   # indices / oil: 1 "pip" = 1 point (SPX500 0.1, oil 0.01)
     if "GC=F" in s or "XAU" in s:
         return 0.1          # gold: 1 pip = $0.10 (convention used here)
     if "XAG" in s:
@@ -303,8 +348,13 @@ def _throttle(min_gap=0.2):  # ~5 requests/second max, avoids Dukascopy 503s
     _last_call[0] = time.time()
 
 
-DUKA_SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD", "XAUUSD",
-                "XAGUSD", "EURJPY", "GBPJPY", "EURGBP"]
+# display name -> Dukascopy instrument (indices / oil). Index CFD history starts ~2012, oil ~2010-2011.
+DUKA_INSTRUMENT = {"US30": "USA30.IDX/USD", "NAS100": "USATECH.IDX/USD", "SPX500": "USA500.IDX/USD", "GER40": "DEU.IDX/EUR",
+                   "UK100": "GBR.IDX/GBP", "JPN225": "JPN.IDX/JPY", "WTI": "LIGHT.CMD/USD", "BRENT": "BRENT.CMD/USD"}
+POINT_SIZE = {"US30": 1.0, "NAS100": 1.0, "SPX500": 0.1, "GER40": 1.0, "UK100": 1.0, "JPN225": 1.0, "WTI": 0.01, "BRENT": 0.01}
+DUKA_SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD", "XAUUSD", "XAGUSD",
+                "EURJPY", "GBPJPY", "EURGBP", "EURAUD", "EURCAD", "EURCHF", "EURNZD", "GBPAUD", "GBPCAD", "GBPCHF", "GBPNZD",
+                "AUDJPY", "AUDCAD", "AUDCHF", "AUDNZD", "CADJPY", "CHFJPY", "NZDJPY", "NZDCAD", "CADCHF"] + list(DUKA_INSTRUMENT)
 
 
 class DukascopySource(DataSource):
@@ -318,7 +368,7 @@ class DukascopySource(DataSource):
 
     def limits_note(self, tf):
         extra = " Untuk 1m disarankan mulai dari beberapa bulan/tahun terakhir saja (datanya sangat besar)." if tf in ("1m", "5m") else ""
-        return ("Dukascopy: riwayat sejak 2003 (EURUSD, XAUUSD, dll), harga BID, dipakai untuk backtest dan data unseen. "
+        return ("Dukascopy: riwayat sejak 2003 (EURUSD, XAUUSD, dll; indeks sejak ±2012, minyak sejak ±2011), harga BID, dipakai untuk backtest dan data unseen. "
                 "Candle yang sedang berjalan + harga live diambil dari biquote.io (broker MT5), jadi bisa beda sedikit "
                 "dengan arsip Dukascopy. Itu normal." + extra)
 
@@ -335,7 +385,7 @@ class DukascopySource(DataSource):
         sess.get = get
         frames, cur = [], start
         while True:  # helper stops at 200k rows per call -> continue from the last bar
-            d = fx.fetch_dukascopy_freeserv(symbol, tf, cur.to_pydatetime(), None, limit=30000, session=sess)
+            d = fx.fetch_dukascopy_freeserv(DUKA_INSTRUMENT.get(symbol.upper(), symbol), tf, cur.to_pydatetime(), None, limit=30000, session=sess)
             if len(d) == 0:
                 break
             frames.append(d)
@@ -378,6 +428,8 @@ class DukascopySource(DataSource):
 
     def live_tail(self, symbol, tf):
         """Recent bars incl. the still-forming one from biquote (chart only, never used for backtests)."""
+        if symbol.upper() in DUKA_INSTRUMENT:
+            return None, None   # biquote has no matching index/oil feed; chart uses Dukascopy only
         btf = tf if tf in fx.BIQUOTE_INTERVALS else "1h"
         d = fx.fetch_biquote(symbol, btf, limit=300)
         if len(d) == 0:
