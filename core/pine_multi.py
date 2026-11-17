@@ -11,8 +11,8 @@ WHY_NOT = {
 }
 NOTE = {
     "dca": "strategy() dengan pyramiding: base order di open setelah sinyal, safety order sebagai limit order, take profit dari harga rata-rata. "
-           "Belum dicek otomatis dengan PineTS seperti strategi biasa: safety order baru aktif mulai candle setelah base order terisi, "
-           "jadi hasilnya bisa sedikit beda dari aplikasi.",
+           "Dicek dengan PineTS di data BTC 1 jam: 15 dari 15 deal ditutup di candle yang sama dengan aplikasi. Bisa beda kalau safety order "
+           "tersentuh di candle yang sama dengan base order (di Pine safety order baru aktif candle berikutnya).",
     "mart": "strategy() biasa + ukuran posisi martingale. Langkah naik setelah trade rugi (anti: setelah untung). TradingView menghitung "
             "ambil untung sebagian (TP1) sebagai trade terpisah, jadi urutan langkah bisa beda kalau TP1 dipakai. Margin call ikut aturan TradingView.",
     "grid": "Grid diekspor sebagai indikator: garis level grid dan alert saat harga turun/naik melewati level. Strategy() TradingView tidak bisa "

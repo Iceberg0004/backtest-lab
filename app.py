@@ -32,6 +32,7 @@ from core.prompt import parse
 from core import robust as R, realism as X
 import ui_extra as U
 import ui_v4 as V
+import ui_v6 as V6
 for _m in list(_sys.modules.values()):   # remember the file version each local module was loaded from (see above)
     _f = getattr(_m, "__file__", None)
     if _f and os.path.abspath(_f).startswith(_HERE + os.sep) and not hasattr(_m, "_bt_mtime") and os.path.exists(_f):
@@ -364,8 +365,8 @@ def selected_strategy():
 # ------------------------------------------------------------------ tabs
 st.title("📈 Backtest Lab")
 st.caption(f"{symbol} · {tf} · sumber: {src.label} · waktu ditampilkan dalam WIB (UTC+7)")
-t_live, t_search, t_scan, t_res, t_ml, t_wfo, t_port, t_cmp, t_sig, t_help = st.tabs(
-    ["📈 Chart Live", "🔬 Cari Strategi", "🛰️ Scan banyak pasar", "📊 Hasil & Detail", "🤖 ML", "🔁 Walk-forward", "🧺 Portofolio",
+t_live, t_search, t_scan, t_res, t_multi, t_ml, t_wfo, t_port, t_cmp, t_sig, t_help = st.tabs(
+    ["📈 Chart Live", "🔬 Cari Strategi", "🛰️ Scan banyak pasar", "📊 Hasil & Detail", "🧮 Grid · Martingale · DCA", "🤖 ML", "🔁 Walk-forward", "🧺 Portofolio",
      "💾 Simpan & Bandingkan", "📡 Sinyal Live", "📘 Panduan"])
 
 with t_live:
@@ -843,6 +844,28 @@ def _res_data():
     cc, _ = shared_cache(dfc, res["cfg"], res["symbol"], res["tf"])
     return res, dfc, cc
 
+
+with t_multi:
+    if st.toggle("Buka alat grid / martingale / DCA / hedging / pairs", key="mp_on",
+                 help="Dimuat hanya kalau dibuka supaya aplikasi tetap ringan."):
+        _dfm = get_data(show=False)
+        if _dfm is not None and len(_dfm) > 600:
+            _dfm = closed_only(_dfm, tf)
+            _ccm, _ = shared_cache(_dfm, dict(carry=carry_cfg()), symbol, tf)
+            _cf, _ca, _pc = cost_params(float(_dfm.close.iloc[-1]))
+            _r = ss.get("res")
+            _rs = None
+            if _r and ss.get("sel") is not None and _r["symbol"] == symbol and _r["tf"] == tf and ss.sel < len(_r["out"]):
+                _rs = (_r["out"][ss.sel]["fam"], _r["out"][ss.sel]["params"])
+            V6.render_multi(dict(
+                df=_dfm, cc=_ccm, symbol=symbol, tf=tf, source=ss.source, cf=_cf, ca=_ca, pine_cost=_pc, oos_pct=ss.oos_pct,
+                max_dd=ss.max_dd / 100, min_pf=ss.oos_min_pf, direction=ss.direction, carry=carry_cfg(),
+                basket=[s_ for s_ in (U.CRYPTO_BASKET if ss.source == "binance" else U.FX_BASKET) if s_ != symbol][:4],
+                symbols=list(dict.fromkeys(src.symbols() + [symbol])), res_strategy=_rs,
+                load_other=lambda s_: closed_only(SOURCES[ss.source].get(s_, tf, start=pd.Timestamp(start_date, tz="UTC"), refresh=True), tf),
+                cost_for=cost_for, make_cache=make_cache))
+        elif _dfm is not None:
+            st.info("Data terlalu pendek (butuh lebih dari 600 candle).")
 
 with t_ml:
     got = _res_data()
