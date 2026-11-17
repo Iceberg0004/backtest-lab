@@ -1,0 +1,10 @@
+# Pinned for Streamlit Community Cloud (Python 3.11 / 3.12 / 3.13).
+# numpy 2.5+ has no Python 3.11 wheels, so allow 2.4.6 on 3.11 and 2.5.x on 3.12+.
+streamlit==1.67.0
+pandas==3.1.1
+numpy>=2.4.6,<2.6
+numba==0.68.1
+pyarrow==26.0.1
+plotly==7.1.0
+requests==2.34.2
+yfinance==1.8.0

@@ -1,0 +1,72 @@
+// Contoh EURUSD
+// Dibuat oleh aplikasi backtest pribadi (non-komersial). Data asal: EURUSD 1h.
+// Logika: Beli saat RSI(21) naik kembali di atas 36 (jenuh jual), hanya searah tren (harga di atas/bawah EMA 100), keluar saat RSI > 60; short saat RSI turun di bawah 61, keluar saat RSI < 40. Stop loss 4.0 x ATR, tanpa take profit tetap, trailing stop 2.0 x ATR. Arah: Long dan Short.
+// contoh hasil uji (test output)
+// Catatan: sinyal dihitung saat candle tutup, order masuk di open candle berikutnya
+// (sama seperti backtest di aplikasi). Pasang di chart EURUSD timeframe 1h.
+// Biaya (fee + slippage + spread) didekati sebagai komisi 0.0064% per sisi.
+// Backtest bukan jaminan hasil di masa depan.
+//@version=5
+strategy("Mean reversion (RSI) - EURUSD 1h", overlay=true, initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     commission_type=strategy.commission.percent, commission_value=0.0064,
+     pyramiding=0, process_orders_on_close=false, margin_long=0, margin_short=0)
+allowLong  = input.bool(true, 'Izinkan Long')
+allowShort = input.bool(true, 'Izinkan Short')
+slK = input.float(4.0, 'Stop loss (x ATR)')
+tpK = input.float(0.0, 'Take profit (x ATR, 0 = tidak ada)')
+trK = input.float(2.0, 'Trailing stop (x ATR, 0 = tidak ada)')
+atr = ta.atr(14)
+trendMa = ta.ema(close, 100)
+trendL = close > trendMa
+trendS = close < trendMa
+plot(trendMa, 'Trend EMA', color=color.gray)
+r = ta.rsi(close, 21)
+longEntry = ta.crossover(r, 36) and trendL
+longExit = ta.crossover(r, 60)
+shortEntry = ta.crossunder(r, 61) and trendS
+shortExit = ta.crossunder(r, 40)
+
+var float lStop = na
+var float lTp = na
+var float sStop = na
+var float sTp = na
+
+if strategy.position_size > 0
+    if allowShort and shortEntry
+        strategy.entry("Short", strategy.short)
+        sStop := close + slK * atr
+        sTp := tpK > 0 ? close - tpK * atr : na
+    else if longExit
+        strategy.close("Long", comment="Exit")
+else if strategy.position_size < 0
+    if allowLong and longEntry
+        strategy.entry("Long", strategy.long)
+        lStop := close - slK * atr
+        lTp := tpK > 0 ? close + tpK * atr : na
+    else if shortExit
+        strategy.close("Short", comment="Exit")
+else
+    if allowLong and longEntry
+        strategy.entry("Long", strategy.long)
+        lStop := close - slK * atr
+        lTp := tpK > 0 ? close + tpK * atr : na
+    else if allowShort and shortEntry
+        strategy.entry("Short", strategy.short)
+        sStop := close + slK * atr
+        sTp := tpK > 0 ? close - tpK * atr : na
+
+// trailing stop diperbarui saat candle tutup, berlaku mulai candle berikutnya
+if strategy.position_size > 0 and trK > 0
+    lStop := math.max(lStop, high - trK * atr)
+if strategy.position_size < 0 and trK > 0
+    sStop := math.min(sStop, low + trK * atr)
+
+strategy.exit("L-SL/TP", "Long", stop=lStop, limit=lTp)
+strategy.exit("S-SL/TP", "Short", stop=sStop, limit=sTp)
+
+plotshape(allowLong and longEntry and strategy.position_size <= 0, "Sinyal Long", shape.labelup, location.belowbar, color.new(color.green, 0), text="Long", textcolor=color.white)
+plotshape(allowShort and shortEntry and strategy.position_size >= 0, "Sinyal Short", shape.labeldown, location.abovebar, color.new(color.red, 0), text="Short", textcolor=color.white)
+alertcondition(allowLong and longEntry, "Long", "EURUSD 1h: sinyal LONG")
+alertcondition(allowShort and shortEntry, "Short", "EURUSD 1h: sinyal SHORT")
+alertcondition(longExit or shortExit, "Exit", "EURUSD 1h: sinyal EXIT")

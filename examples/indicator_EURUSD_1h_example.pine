@@ -1,0 +1,108 @@
+// Contoh EURUSD
+// Dibuat oleh aplikasi backtest pribadi (non-komersial). Data asal: EURUSD 1h.
+// Logika: Beli saat RSI(21) naik kembali di atas 36 (jenuh jual), hanya searah tren (harga di atas/bawah EMA 100), keluar saat RSI > 60; short saat RSI turun di bawah 61, keluar saat RSI < 40. Stop loss 4.0 x ATR, tanpa take profit tetap, trailing stop 2.0 x ATR. Arah: Long dan Short.
+// contoh hasil uji (test output)
+// Catatan: sinyal dihitung saat candle tutup, order masuk di open candle berikutnya
+// (sama seperti backtest di aplikasi). Pasang di chart EURUSD timeframe 1h.
+// Biaya (fee + slippage + spread) didekati sebagai komisi 0.0064% per sisi.
+// Backtest bukan jaminan hasil di masa depan.
+//@version=5
+indicator("Mean reversion (RSI) (indikator) - EURUSD 1h", overlay=true)
+allowLong  = input.bool(true, 'Izinkan Long')
+allowShort = input.bool(true, 'Izinkan Short')
+slK = input.float(4.0, 'Stop loss (x ATR)')
+tpK = input.float(0.0, 'Take profit (x ATR, 0 = tidak ada)')
+trK = input.float(2.0, 'Trailing stop (x ATR, 0 = tidak ada)')
+atr = ta.atr(14)
+trendMa = ta.ema(close, 100)
+trendL = close > trendMa
+trendS = close < trendMa
+plot(trendMa, 'Trend EMA', color=color.gray)
+r = ta.rsi(close, 21)
+longEntry = ta.crossover(r, 36) and trendL
+longExit = ta.crossover(r, 60)
+shortEntry = ta.crossunder(r, 61) and trendS
+shortExit = ta.crossunder(r, 40)
+
+// Simulasi posisi yang sama persis dengan versi strategy(): sinyal candle sebelumnya dieksekusi di open,
+// lalu cek stop/target dengan high/low (stop dianggap kena lebih dulu), lalu trailing di close.
+var int pos = 0
+var float ep = na
+var float stp = na
+var float tgt = na
+bool goLong = false
+bool goShort = false
+bool exitSig = false
+bool exitStop = false
+bool exitTp = false
+float tradePnl = na
+
+if pos == 1
+    if allowShort and shortEntry[1]
+        tradePnl := (open - ep) / ep * 100
+        goShort := true
+    else if longExit[1]
+        tradePnl := (open - ep) / ep * 100
+        exitSig := true
+        pos := 0
+else if pos == -1
+    if allowLong and longEntry[1]
+        tradePnl := (ep - open) / ep * 100
+        goLong := true
+    else if shortExit[1]
+        tradePnl := (ep - open) / ep * 100
+        exitSig := true
+        pos := 0
+else
+    if allowLong and longEntry[1]
+        goLong := true
+    else if allowShort and shortEntry[1]
+        goShort := true
+
+if goLong
+    pos := 1
+    ep := open
+    stp := close[1] - slK * atr[1]
+    tgt := tpK > 0 ? close[1] + tpK * atr[1] : na
+if goShort
+    pos := -1
+    ep := open
+    stp := close[1] + slK * atr[1]
+    tgt := tpK > 0 ? close[1] - tpK * atr[1] : na
+
+if pos == 1
+    if low <= stp
+        tradePnl := (math.min(open, stp) - ep) / ep * 100
+        exitStop := true
+        pos := 0
+    else if tpK > 0 and high >= tgt
+        tradePnl := (math.max(open, tgt) - ep) / ep * 100
+        exitTp := true
+        pos := 0
+else if pos == -1
+    if high >= stp
+        tradePnl := (ep - math.max(open, stp)) / ep * 100
+        exitStop := true
+        pos := 0
+    else if tpK > 0 and low <= tgt
+        tradePnl := (ep - math.min(open, tgt)) / ep * 100
+        exitTp := true
+        pos := 0
+
+if pos == 1 and trK > 0
+    stp := math.max(stp, high - trK * atr)
+if pos == -1 and trK > 0
+    stp := math.min(stp, low + trK * atr)
+
+plotshape(goLong, "Long", shape.labelup, location.belowbar, color.new(color.green, 0), text="Long", textcolor=color.white)
+plotshape(goShort, "Short", shape.labeldown, location.abovebar, color.new(color.red, 0), text="Short", textcolor=color.white)
+if not na(tradePnl)
+    label.new(bar_index, high, (exitStop ? "SL " : exitTp ? "TP " : "Exit ") + str.tostring(tradePnl, "#.##") + "%",
+         style=label.style_label_down, color=tradePnl >= 0 ? color.new(color.teal, 20) : color.new(color.maroon, 20),
+         textcolor=color.white, size=size.small)
+plot(pos != 0 ? stp : na, "Stop", color=color.red, style=plot.style_linebr)
+plot(pos != 0 and tpK > 0 ? tgt : na, "Target", color=color.green, style=plot.style_linebr)
+
+alertcondition(allowLong and longEntry, "Long", "EURUSD 1h: sinyal LONG (masuk di open candle berikutnya)")
+alertcondition(allowShort and shortEntry, "Short", "EURUSD 1h: sinyal SHORT (masuk di open candle berikutnya)")
+alertcondition((pos[1] == 1 and longExit) or (pos[1] == -1 and shortExit), "Exit", "EURUSD 1h: sinyal EXIT")

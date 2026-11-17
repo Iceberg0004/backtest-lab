@@ -1,0 +1,32 @@
+# Virtualenvs and caches
+.venv/
+venv/
+env/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.numba_cache/
+numba_cache/
+
+# App data (ephemeral on Streamlit Cloud anyway)
+data_cache/
+*.parquet
+shots/
+*.mp4
+*.log
+
+# Secrets and local overrides — never commit
+.streamlit/secrets.toml
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
