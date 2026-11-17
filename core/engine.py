@@ -76,7 +76,7 @@ def fix_params(fam, p, tf_min=60, combo=False):
     for k, v in FAMILIES[fam]["space"].items():
         if isinstance(v, tuple):
             p[k] = int(min(max(int(p[k]), v[0]), v[1]))
-    if fam in ("ma_cross", "macd", "ma2") and p["fast"] >= p["slow"] * 0.8:
+    if fam in ("ma_cross", "macd", "ma2", "macd_div") and p["fast"] >= p["slow"] * 0.8:
         p["slow"] = int(max(p["slow"], p["fast"] * 1.5 + 2))
     if fam in ("donchian", "vol_bo") and p["exit_len"] > p["entry_len"]:
         p["exit_len"] = max(3, p["entry_len"] // 2)
@@ -92,6 +92,7 @@ def fix_params(fam, p, tf_min=60, combo=False):
         p["sess"] = 0
     if p.get("htf_m", 0) and p["htf_m"] <= tf_min:
         p["htf_m"] = 0
+    p.update(FAMILIES[fam].get("fixed") or {})   # e.g. buy & hold: no exits, no filters
     return p
 
 

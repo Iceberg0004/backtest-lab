@@ -406,3 +406,125 @@ def htf_trend(t_ms, c, period_ms, n):
 def rolling_sum(x, n):
     import pandas as pd
     return pd.Series(np.asarray(x, float)).rolling(int(n), min_periods=int(n)).sum().to_numpy()
+
+
+# ------------------------------------------------------------------ v6 helpers (all causal; Pine twins in families.py)
+@njit(cache=True)
+def barssince(flag):
+    """Pine ta.barssince: bars since flag was last true (0 on the bar itself), NaN before the first time."""
+    out = np.full(flag.shape[0], np.nan)
+    last = -1
+    for i in range(flag.shape[0]):
+        if flag[i]:
+            last = i
+        if last >= 0:
+            out[i] = i - last
+    return out
+
+
+@njit(cache=True)
+def vwap_day(h, l, c, v, day):
+    """VWAP that restarts every UTC day, with the volume-weighted standard deviation and the bar count in the day."""
+    m = c.shape[0]
+    vw = np.full(m, np.nan); sd = np.full(m, np.nan); nb = np.zeros(m)
+    spv = 0.0; sv = 0.0; sp2v = 0.0; k = 0
+    for i in range(m):
+        if i == 0 or day[i] != day[i - 1]:
+            spv = 0.0; sv = 0.0; sp2v = 0.0; k = 0
+        tp = (h[i] + l[i] + c[i]) / 3
+        spv += tp * v[i]; sv += v[i]; sp2v += tp * tp * v[i]; k += 1
+        nb[i] = k
+        if sv > 0:
+            vw[i] = spv / sv
+            var = sp2v / sv - vw[i] * vw[i]
+            sd[i] = np.sqrt(var) if var > 0 else 0.0
+    return vw, sd, nb
+
+
+@njit(cache=True)
+def fvg_signals(h, l, c, W):
+    """Fair value gap retest. Bullish FVG at bar i: low[i] > high[i-2] (zone high[i-2]..low[i]). Long when a later bar
+    dips into the zone (low <= top) and closes above its bottom, at most W bars after it formed; the zone is then used.
+    A close below the bottom cancels it. Bearish is the mirror. Order per bar: check old zones first, then create."""
+    m = c.shape[0]
+    bull = np.zeros(m, np.bool_); bear = np.zeros(m, np.bool_)
+    bt = np.nan; bb = np.nan; ba = -1
+    st = np.nan; sb = np.nan; sa = -1
+    for i in range(m):
+        if ba >= 0:
+            if i - ba > W or c[i] < bb:
+                ba = -1
+            elif l[i] <= bt and c[i] > bb:
+                bull[i] = True; ba = -1
+        if sa >= 0:
+            if i - sa > W or c[i] > st:
+                sa = -1
+            elif h[i] >= sb and c[i] < st:
+                bear[i] = True; sa = -1
+        if i >= 2:
+            if l[i] > h[i - 2]:
+                bt = l[i]; bb = h[i - 2]; ba = i
+            if h[i] < l[i - 2]:
+                st = l[i - 2]; sb = h[i]; sa = i
+    return bull, bear
+
+
+@njit(cache=True)
+def bos_signals(o, h, l, c, R, mode, W):
+    """Break of structure on confirmed swing points (R bars each side).
+    mode 0: signal on the break (close crosses the last swing high / low).
+    mode 1: order block: at a bullish break remember the last red candle (up to 20 bars back) and go long when price
+    comes back into it (low <= its high, close > its low) within W bars. Bearish is the mirror."""
+    m = c.shape[0]
+    bull = np.zeros(m, np.bool_); bear = np.zeros(m, np.bool_)
+    sh = np.nan; sl = np.nan
+    obh = np.nan; obl = np.nan; oba = -1
+    sbh = np.nan; sbl = np.nan; sba = -1
+    Wd = 2 * R + 1
+    for i in range(m):
+        # order-block retests (zones created on earlier bars)
+        if oba >= 0:
+            if i - oba > W or c[i] < obl:
+                oba = -1
+            elif l[i] <= obh and c[i] > obl:
+                bull[i] = True; oba = -1
+        if sba >= 0:
+            if i - sba > W or c[i] > sbh:
+                sba = -1
+            elif h[i] >= sbl and c[i] < sbh:
+                bear[i] = True; sba = -1
+        # swing points confirmed on this bar
+        if i >= Wd - 1:
+            hi = h[i]; lo = l[i]
+            for k in range(1, Wd):
+                hi = max(hi, h[i - k]); lo = min(lo, l[i - k])
+            if h[i - R] == hi:
+                sh = h[i - R]
+            if l[i - R] == lo:
+                sl = l[i - R]
+        if i >= 1:
+            up = c[i] > sh and c[i - 1] <= sh
+            dn = c[i] < sl and c[i - 1] >= sl
+            if up:
+                if mode == 0:
+                    bull[i] = True
+                else:
+                    for k in range(0, 21):
+                        if i - k < 0:
+                            break
+                        if c[i - k] < o[i - k]:
+                            obh = h[i - k]; obl = l[i - k]; oba = i
+                            break
+                sh = np.nan
+            if dn:
+                if mode == 0:
+                    bear[i] = True
+                else:
+                    for k in range(0, 21):
+                        if i - k < 0:
+                            break
+                        if c[i - k] > o[i - k]:
+                            sbh = h[i - k]; sbl = l[i - k]; sba = i
+                            break
+                sl = np.nan
+    return bull, bear

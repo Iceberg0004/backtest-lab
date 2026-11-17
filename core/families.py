@@ -5,6 +5,7 @@ trend EMA are added generically in engine.py / pine.py."""
 from __future__ import annotations
 import math
 import numpy as np
+import pandas as pd
 from . import indicators as ind
 
 R_ = repr  # exact float literal for Pine
@@ -25,10 +26,10 @@ def _cu(a, b):
 F = {}
 
 
-def fam(key, name, space, intraday=False, needs_volume=False, sub=None, needs=None):
+def fam(key, name, space, intraday=False, needs_volume=False, sub=None, needs=None, fixed=None):
     def deco(cls):
         F[key] = dict(name=name, space=space, py=cls.py, pine=cls.pine, desc=cls.desc, intraday=intraday,
-                      needs_volume=needs_volume, sub=sub, needs=set(needs or ()))
+                      needs_volume=needs_volume, sub=sub, needs=set(needs or ()), fixed=dict(fixed or {}))
         return cls
     return deco
 
@@ -815,3 +816,327 @@ class _:
             return f"Ikut order flow: beli saat delta taker {p['n']} candle > {p['thr'] * 100:.0f}% volume, short saat < -{p['thr'] * 100:.0f}%"
         return (f"Divergence order flow: beli saat harga di low {p['n']} candle tapi pembeli agresif dominan (> {p['thr'] * 100:.0f}% volume); "
                 "short kebalikannya")
+
+
+# ------------------------------------------------------------------ v6: more classic retail strategies (all with Pine twins)
+def _fb(a):
+    return np.nan_to_num(np.asarray(a, float), nan=0).astype(np.bool_)
+
+
+@fam("macd_div", "Divergence MACD", {"fast": (5, 20), "slow": (21, 60), "signal": (5, 15), "dv_piv": (3, 6), "trend": T4}, sub="_macd")
+class _:
+    def py(p, cc):
+        ef = cc.get(("ema", "c", p["fast"]), lambda: ind.ema(cc.c, p["fast"]))
+        es = cc.get(("ema", "c", p["slow"]), lambda: ind.ema(cc.c, p["slow"]))
+        ml = ef - es
+        sg = ind.ema(ml, p["signal"])
+        bull, bear = ind.divergence(cc.h, cc.l, np.asarray(ml, float), p["dv_piv"])
+        return bull, _cu(ml, sg), bear, _cx(ml, sg), {"_macd": ml, "_macd_signal": sg}
+
+    def pine(p):
+        R = p["dv_piv"]; W = 2 * R + 1
+        return [f"mdL = ta.ema(close, {p['fast']}) - ta.ema(close, {p['slow']})", f"mdS = ta.ema(mdL, {p['signal']})",
+                f"mdLo = ta.lowest(low, {W})", f"mdHi = ta.highest(high, {W})",
+                "var float mdPl = na", "var float mdPr = na", "var float mdPh = na", "var float mdPhr = na",
+                "bool mdBull = false", "bool mdBear = false",
+                f"if bar_index >= {W - 1} and low[{R}] == mdLo",
+                f"    mdBull := low[{R}] < mdPl and mdL[{R}] > mdPr", f"    mdPl := low[{R}]", f"    mdPr := mdL[{R}]",
+                f"if bar_index >= {W - 1} and high[{R}] == mdHi",
+                f"    mdBear := high[{R}] > mdPh and mdL[{R}] < mdPhr", f"    mdPh := high[{R}]", f"    mdPhr := mdL[{R}]",
+                "mdXU = ta.crossover(mdL, mdS)", "mdXD = ta.crossunder(mdL, mdS)",
+                "longEntry = mdBull", "longExit = mdXD", "shortEntry = mdBear", "shortExit = mdXU"]
+
+    def desc(p):
+        return (f"Beli saat harga membuat low lebih rendah tapi MACD({p['fast']},{p['slow']}) low lebih tinggi (bullish divergence, "
+                f"pivot {p['dv_piv']}); keluar saat MACD memotong ke bawah signal({p['signal']}). Short kebalikannya")
+
+
+@fam("pinbar", "Pola candle pin bar", {"pb_k": [2.0, 3.0], "pb_wr": [0.5, 0.66], "pb_n": [5, 10, 20], "trend": T4})
+class _:
+    def py(p, cc):
+        o, h, l, c = cc.o, cc.h, cc.l, cc.c
+        rg = h - l; body = np.abs(c - o)
+        lw = np.minimum(o, c) - l; uw = h - np.maximum(o, c)
+        ll = cc.get(("llc", p["pb_n"]), lambda: ind.rolling_min(l, p["pb_n"]))
+        hh = cc.get(("hhc", p["pb_n"]), lambda: ind.rolling_max(h, p["pb_n"]))
+        tol = c * 1e-10   # exact ties (wick = k x body) are decided by 1-ulp rounding; treat them the same way as Pine
+        with np.errstate(invalid="ignore"):
+            bull = (rg > 0) & (lw >= p["pb_k"] * body - tol) & (lw >= p["pb_wr"] * rg - tol) & (l == ll)
+            bear = (rg > 0) & (uw >= p["pb_k"] * body - tol) & (uw >= p["pb_wr"] * rg - tol) & (h == hh)
+        return bull, bear, bear, bull, {}
+
+    def pine(p):
+        return ["pbR = high - low", "pbBody = math.abs(close - open)", "pbLw = math.min(open, close) - low", "pbUw = high - math.max(open, close)",
+                f"pbLL = ta.lowest(low, {p['pb_n']})", f"pbHH = ta.highest(high, {p['pb_n']})",
+                "pbTol = close * 1e-10",
+                f"pbBull = pbR > 0 and pbLw >= {R_(p['pb_k'])} * pbBody - pbTol and pbLw >= {R_(p['pb_wr'])} * pbR - pbTol and low == pbLL",
+                f"pbBear = pbR > 0 and pbUw >= {R_(p['pb_k'])} * pbBody - pbTol and pbUw >= {R_(p['pb_wr'])} * pbR - pbTol and high == pbHH",
+                "longEntry = pbBull", "longExit = pbBear", "shortEntry = pbBear", "shortExit = pbBull"]
+
+    def desc(p):
+        return (f"Beli saat pin bar bullish (ekor bawah ≥ {p['pb_k']:g}x badan dan ≥ {p['pb_wr'] * 100:.0f}% panjang candle) di low terendah "
+                f"{p['pb_n']} candle; short saat pin bar bearish di high tertinggi")
+
+
+@fam("doji", "Pola candle doji (pembalikan)", {"dj_t": [0.05, 0.1], "dj_n": [5, 10, 20], "trend": T4})
+class _:
+    def py(p, cc):
+        o, h, l, c = cc.o, cc.h, cc.l, cc.c
+        rg = h - l
+        with np.errstate(invalid="ignore"):
+            dj = (rg > 0) & (np.abs(c - o) <= p["dj_t"] * rg + c * 1e-10)
+        ll = cc.get(("llc", p["dj_n"]), lambda: ind.rolling_min(l, p["dj_n"]))
+        hh = cc.get(("hhc", p["dj_n"]), lambda: ind.rolling_max(h, p["dj_n"]))
+        dj1 = _fb(ind.shift(dj.astype(float)))
+        with np.errstate(invalid="ignore"):
+            bull = dj1 & (ind.shift(l) == ind.shift(ll)) & (c > ind.shift(h))
+            bear = dj1 & (ind.shift(h) == ind.shift(hh)) & (c < ind.shift(l))
+        return bull, bear, bear, bull, {}
+
+    def pine(p):
+        return ["djR = high - low", f"djDoji = djR > 0 and math.abs(close - open) <= {R_(p['dj_t'])} * djR + close * 1e-10",
+                f"djLL = ta.lowest(low, {p['dj_n']})", f"djHH = ta.highest(high, {p['dj_n']})",
+                "djBull = nz(djDoji[1], false) and low[1] == djLL[1] and close > high[1]",
+                "djBear = nz(djDoji[1], false) and high[1] == djHH[1] and close < low[1]",
+                "longEntry = djBull", "longExit = djBear", "shortEntry = djBear", "shortExit = djBull"]
+
+    def desc(p):
+        return (f"Doji (badan ≤ {p['dj_t'] * 100:.0f}% panjang candle) di low terendah {p['dj_n']} candle, lalu candle berikutnya tutup "
+                f"di atas high doji: beli. Short kebalikannya")
+
+
+@fam("fib", "Pullback Fibonacci retracement", {"fb_n": (20, 200), "fb_f": [0.382, 0.5, 0.618, 0.786], "trend": T4})
+class _:
+    def py(p, cc):
+        n, f = p["fb_n"], p["fb_f"]
+        H = cc.get(("hhc", n), lambda: ind.rolling_max(cc.h, n))
+        L = cc.get(("llc", n), lambda: ind.rolling_min(cc.l, n))
+        with np.errstate(invalid="ignore"):
+            bsH = ind.barssince(_fb(cc.h >= H)); bsL = ind.barssince(_fb(cc.l <= L))
+            up = bsH < bsL; dn = bsL < bsH
+            lvL = H - f * (H - L); lvS = L + f * (H - L)
+            le = up & (cc.l <= lvL) & (cc.c > lvL)
+            se = dn & (cc.h >= lvS) & (cc.c < lvS)
+            lx = cc.h >= ind.shift(H); sx = cc.l <= ind.shift(L)
+        return le, lx, se, sx, {f"Fib {f:g} (long)": np.where(up, lvL, np.nan), f"Fib {f:g} (short)": np.where(dn, lvS, np.nan)}
+
+    def pine(p):
+        n, f = p["fb_n"], R_(p["fb_f"])
+        return [f"fbH = ta.highest(high, {n})", f"fbL = ta.lowest(low, {n})",
+                "fbBsH = ta.barssince(high >= fbH)", "fbBsL = ta.barssince(low <= fbL)",
+                "fbUp = fbBsH < fbBsL", "fbDn = fbBsL < fbBsH",
+                f"fbLvL = fbH - {f} * (fbH - fbL)", f"fbLvS = fbL + {f} * (fbH - fbL)",
+                "longEntry = fbUp and low <= fbLvL and close > fbLvL", "shortEntry = fbDn and high >= fbLvS and close < fbLvS",
+                "longExit = high >= fbH[1]", "shortExit = low <= fbL[1]",
+                "plot(fbUp ? fbLvL : na, 'Fib long', color=color.teal, style=plot.style_linebr)",
+                "plot(fbDn ? fbLvS : na, 'Fib short', color=color.maroon, style=plot.style_linebr)"]
+
+    def desc(p):
+        return (f"Swing {p['fb_n']} candle. Kalau high terbaru lebih baru dari low (kaki naik), beli saat harga turun ke retracement "
+                f"{p['fb_f'] * 100:.1f}% lalu tutup di atasnya; target high sebelumnya. Short kebalikannya")
+
+
+@fam("vwap_mr", "VWAP reversion (band harian)", {"vw_k": [1.0, 1.5, 2.0, 2.5], "vw_min": [3, 6], "trend": T4}, intraday=True, needs_volume=True)
+class _:
+    def py(p, cc):
+        vw, sd, nb = cc.get(("vwap_day",), lambda: ind.vwap_day(cc.h, cc.l, cc.c, cc.v, cc.day.astype(np.float64)))
+        lo, hi = vw - p["vw_k"] * sd, vw + p["vw_k"] * sd
+        ok = nb >= p["vw_min"]
+        return ok & _cx(cc.c, lo), _cx(cc.c, vw), ok & _cu(cc.c, hi), _cu(cc.c, vw), {"VWAP": vw, "VWAP bawah": lo, "VWAP atas": hi}
+
+    def pine(p):
+        k = R_(p["vw_k"])
+        return ["vwDay = math.floor(time / 86400000)",
+                "var float vwSPV = 0.0", "var float vwSV = 0.0", "var float vwSP2V = 0.0", "var int vwK = 0",
+                "if bar_index == 0 or vwDay != vwDay[1]", "    vwSPV := 0.0", "    vwSV := 0.0", "    vwSP2V := 0.0", "    vwK := 0",
+                "vwTp = (high + low + close) / 3",
+                "vwSPV := vwSPV + vwTp * volume", "vwSV := vwSV + volume", "vwSP2V := vwSP2V + vwTp * vwTp * volume", "vwK := vwK + 1",
+                "vwV = vwSV > 0 ? vwSPV / vwSV : na", "vwVar = vwSV > 0 ? vwSP2V / vwSV - vwV * vwV : na",
+                "vwSd = vwSV > 0 ? (vwVar > 0 ? math.sqrt(vwVar) : 0.0) : na",
+                f"vwLo = vwV - {k} * vwSd", f"vwHi = vwV + {k} * vwSd",
+                f"longEntry = vwK >= {p['vw_min']} and ta.crossover(close, vwLo)", "longExit = ta.crossover(close, vwV)",
+                f"shortEntry = vwK >= {p['vw_min']} and ta.crossunder(close, vwHi)", "shortExit = ta.crossunder(close, vwV)",
+                "plot(vwV, 'VWAP', color=color.orange)", "plot(vwLo, 'VWAP bawah', color=color.gray)", "plot(vwHi, 'VWAP atas', color=color.gray)"]
+
+    def desc(p):
+        return (f"VWAP harian (mulai ulang 00:00 UTC = 07:00 WIB). Beli saat harga kembali naik ke atas VWAP − {p['vw_k']:g} deviasi, "
+                f"keluar di VWAP; short kebalikannya. Hanya setelah {p['vw_min']} candle pertama hari itu")
+
+
+@fam("fvg", "SMC: fair value gap (retest)", {"fv_w": [5, 10, 20, 50], "trend": T4})
+class _:
+    def py(p, cc):
+        bull, bear = cc.get(("fvg", p["fv_w"]), lambda: ind.fvg_signals(cc.h, cc.l, cc.c, p["fv_w"]))
+        return bull, bear, bear, bull, {}
+
+    def pine(p):
+        W = p["fv_w"]
+        return ["var float fbT = na", "var float fbB = na", "var int fbA = -1", "var float fsT = na", "var float fsB = na", "var int fsA = -1",
+                "bool fvBull = false", "bool fvBear = false",
+                "if fbA >= 0", f"    if bar_index - fbA > {W} or close < fbB", "        fbA := -1",
+                "    else if low <= fbT and close > fbB", "        fvBull := true", "        fbA := -1",
+                "if fsA >= 0", f"    if bar_index - fsA > {W} or close > fsT", "        fsA := -1",
+                "    else if high >= fsB and close < fsT", "        fvBear := true", "        fsA := -1",
+                "if bar_index >= 2", "    if low > high[2]", "        fbT := low", "        fbB := high[2]", "        fbA := bar_index",
+                "    if high < low[2]", "        fsT := low[2]", "        fsB := high", "        fsA := bar_index",
+                "longEntry = fvBull", "longExit = fvBear", "shortEntry = fvBear", "shortExit = fvBull"]
+
+    def desc(p):
+        return (f"Fair value gap bullish = celah antara high 2 candle lalu dan low candle sekarang. Beli saat harga kembali masuk celah itu "
+                f"dan tutup di atas dasarnya (maks {p['fv_w']} candle setelah celah terbentuk). Short kebalikannya")
+
+
+@fam("bos", "SMC: break of structure / order block", {"bs_r": (2, 6), "bs_mode": [0, 1], "bs_w": [10, 20, 50], "trend": T4})
+class _:
+    def py(p, cc):
+        bull, bear = cc.get(("bos", p["bs_r"], p["bs_mode"], p["bs_w"]),
+                            lambda: ind.bos_signals(cc.o, cc.h, cc.l, cc.c, p["bs_r"], p["bs_mode"], p["bs_w"]))
+        return bull, bear, bear, bull, {}
+
+    def pine(p):
+        R = p["bs_r"]; Wd = 2 * R + 1; W = p["bs_w"]
+        L = [f"bsHi = ta.highest(high, {Wd})", f"bsLo = ta.lowest(low, {Wd})", "var float bsSH = na", "var float bsSL = na",
+             "var float obH = na", "var float obL = na", "var int obA = -1", "var float sbH = na", "var float sbL = na", "var int sbA = -1",
+             "bool bsBull = false", "bool bsBear = false",
+             "if obA >= 0", f"    if bar_index - obA > {W} or close < obL", "        obA := -1",
+             "    else if low <= obH and close > obL", "        bsBull := true", "        obA := -1",
+             "if sbA >= 0", f"    if bar_index - sbA > {W} or close > sbH", "        sbA := -1",
+             "    else if high >= sbL and close < sbH", "        bsBear := true", "        sbA := -1",
+             f"if bar_index >= {Wd - 1}", f"    if high[{R}] == bsHi", f"        bsSH := high[{R}]", f"    if low[{R}] == bsLo", f"        bsSL := low[{R}]",
+             "if bar_index >= 1",
+             "    bsUp = close > bsSH and close[1] <= bsSH", "    bsDn = close < bsSL and close[1] >= bsSL",
+             "    if bsUp"]
+        if p["bs_mode"] == 0:
+            L += ["        bsBull := true"]
+        else:
+            L += ["        for k = 0 to 20", "            if k > bar_index", "                break",
+                  "            if close[k] < open[k]", "                obH := high[k]", "                obL := low[k]", "                obA := bar_index",
+                  "                break"]
+        L += ["        bsSH := na", "    if bsDn"]
+        if p["bs_mode"] == 0:
+            L += ["        bsBear := true"]
+        else:
+            L += ["        for k = 0 to 20", "            if k > bar_index", "                break",
+                  "            if close[k] > open[k]", "                sbH := high[k]", "                sbL := low[k]", "                sbA := bar_index",
+                  "                break"]
+        L += ["        bsSL := na", "longEntry = bsBull", "longExit = bsBear", "shortEntry = bsBear", "shortExit = bsBull"]
+        return L
+
+    def desc(p):
+        if p["bs_mode"] == 0:
+            return (f"Break of structure: beli saat harga tutup menembus swing high terakhir (swing dikonfirmasi {p['bs_r']} candle tiap sisi); "
+                    f"short saat menembus swing low terakhir")
+        return (f"Order block: setelah break of structure naik, tandai candle merah terakhir sebelum tembusan; beli saat harga kembali ke "
+                f"candle itu dan tutup di atas low-nya (maks {p['bs_w']} candle). Short kebalikannya")
+
+
+@fam("sweep", "SMC: liquidity sweep (stop hunt)", {"sw_n": (10, 100), "trend": T4})
+class _:
+    def py(p, cc):
+        n = p["sw_n"]
+        ll = ind.shift(cc.get(("llc", n), lambda: ind.rolling_min(cc.l, n)))
+        hh = ind.shift(cc.get(("hhc", n), lambda: ind.rolling_max(cc.h, n)))
+        with np.errstate(invalid="ignore"):
+            bull = (cc.l < ll) & (cc.c > ll)
+            bear = (cc.h > hh) & (cc.c < hh)
+        return bull, bear, bear, bull, {f"Low {n}": ll, f"High {n}": hh}
+
+    def pine(p):
+        n = p["sw_n"]
+        return [f"swLL = ta.lowest(low, {n})[1]", f"swHH = ta.highest(high, {n})[1]",
+                "swBull = low < swLL and close > swLL", "swBear = high > swHH and close < swHH",
+                "longEntry = swBull", "longExit = swBear", "shortEntry = swBear", "shortExit = swBull"]
+
+    def desc(p):
+        return (f"Beli saat harga sempat menembus low terendah {p['sw_n']} candle (menyapu stop loss) tapi tutup kembali di atasnya; "
+                f"short kebalikannya di high tertinggi")
+
+
+@fam("season_hour", "Musiman: jam & hari tertentu", {"se_h": (0, 23), "se_hold": [1, 2, 4, 8], "se_d": [-1, 0, 1, 2, 3, 4], "se_s": [1, -1]},
+     intraday=True)
+class _:
+    def py(p, cc):
+        on = (cc.hour == p["se_h"]) & ((p["se_d"] < 0) | (cc.dow == p["se_d"]))
+        off = cc.hour == (p["se_h"] + p["se_hold"]) % 24
+        z = np.zeros(len(cc.c), np.bool_)
+        return (on if p["se_s"] == 1 else z), off, (on if p["se_s"] == -1 else z), off, {}
+
+    def pine(p):
+        dcond = "true" if p["se_d"] < 0 else f"seDow == {p['se_d']}"
+        return ["seHr = math.floor(time / 3600000) % 24", "seDow = (math.floor(time / 86400000) + 3) % 7",
+                f"seOn = seHr == {p['se_h']} and {dcond}", f"seOff = seHr == {(p['se_h'] + p['se_hold']) % 24}",
+                f"longEntry = {'seOn' if p['se_s'] == 1 else 'false'}", "longExit = seOff",
+                f"shortEntry = {'seOn' if p['se_s'] == -1 else 'false'}", "shortExit = seOff"]
+
+    def desc(p):
+        days = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
+        d = "setiap hari" if p["se_d"] < 0 else f"hanya hari {days[p['se_d']]}"
+        return (f"{'Beli' if p['se_s'] == 1 else 'Short'} setelah candle jam {p['se_h']:02d}:00 UTC ({(p['se_h'] + 7) % 24:02d}:00 WIB) tutup, "
+                f"{d}; tutup setelah ±{p['se_hold']} jam")
+
+
+def _dom_after(t_ms, days):
+    return np.asarray(pd.to_datetime(t_ms + int(days) * 86_400_000, unit="ms").day)
+
+
+@fam("season_tom", "Musiman: pergantian bulan", {"tm_last": [0, 1, 2, 3], "tm_first": [1, 2, 3, 5], "tm_s": [1, -1]})
+class _:
+    def py(p, cc):
+        d0 = cc.get(("dom", 0), lambda: _dom_after(cc.t_ms, 0))
+        dN = cc.get(("dom", p["tm_last"]), lambda: _dom_after(cc.t_ms, p["tm_last"]))
+        tom = ((dN < d0) if p["tm_last"] > 0 else np.zeros(len(d0), np.bool_)) | (d0 <= p["tm_first"])
+        prev = np.r_[False, tom[:-1]]
+        ent = tom & ~prev; ext = ~tom
+        z = np.zeros(len(d0), np.bool_)
+        return (ent if p["tm_s"] == 1 else z), ext, (ent if p["tm_s"] == -1 else z), ext, {}
+
+    def pine(p):
+        # day of month from Unix time without timezone functions (H. Hinnant's civil-from-days), UTC like the app
+        L = ["seDom(t) =>", "    z = math.floor(t / 86400000) + 719468", "    era = math.floor(z / 146097)", "    doe = z - era * 146097",
+             "    yoe = math.floor((doe - math.floor(doe / 1460) + math.floor(doe / 36524) - math.floor(doe / 146096)) / 365)",
+             "    doy = doe - (365 * yoe + math.floor(yoe / 4) - math.floor(yoe / 100))", "    mp = math.floor((5 * doy + 2) / 153)",
+             "    doy - math.floor((153 * mp + 2) / 5) + 1",
+             "tmD0 = seDom(time)"]
+        last = f"seDom(time + {p['tm_last']} * 86400000) < tmD0" if p["tm_last"] > 0 else "false"
+        L += [f"tmOn = {last} or tmD0 <= {p['tm_first']}", "tmEnt = tmOn and not nz(tmOn[1], false)",
+              f"longEntry = {'tmEnt' if p['tm_s'] == 1 else 'false'}", "longExit = not tmOn",
+              f"shortEntry = {'tmEnt' if p['tm_s'] == -1 else 'false'}", "shortExit = not tmOn"]
+        return L
+
+    def desc(p):
+        a = f"{p['tm_last']} hari terakhir bulan sampai " if p["tm_last"] > 0 else "awal bulan sampai "
+        return f"{'Beli' if p['tm_s'] == 1 else 'Short'} dari {a}hari ke-{p['tm_first']} bulan berikutnya (efek pergantian bulan), lalu keluar"
+
+
+BH_FIXED = {"sl_mode": 1, "sl_pct": 99.0, "tp_pct": 0.0, "tp_atr": 0.0, "trail_atr": 0.0, "tp1_r": 0.0, "be_r": 0.0, "max_bars": 0,
+            "exit_sig": 0, "regime": 0, "sess": 0, "dow": 0, "htf_m": 0, "vol": 0, "rsi_f": 0, "volf": 0, "fund_f": 0, "flow_f": 0, "oi_f": 0}
+
+
+@fam("bh", "Patokan: beli & tahan", {"trend": [0]}, fixed=BH_FIXED)
+class _:
+    def py(p, cc):
+        n = len(cc.c)
+        return np.ones(n, np.bool_), np.zeros(n, np.bool_), np.zeros(n, np.bool_), np.zeros(n, np.bool_), {}
+
+    def pine(p):
+        return ["longEntry = true", "longExit = false", "shortEntry = false", "shortExit = false"]
+
+    def desc(p):
+        return "Patokan: beli di awal dan tahan (masuk lagi kalau kena stop). Strategi lain sebaiknya mengalahkan ini setelah biaya"
+
+
+@fam("carry", "Carry funding (terima funding)", {"cr_n": [24, 72, 168], "cr_thr": [0.00005, 0.0001, 0.0002], "trend": T4}, needs=("fund",))
+class _:
+    def py(p, cc):
+        m = cc.get(("fund_sma", p["cr_n"]), lambda: ind.sma(np.nan_to_num(cc.x["fund"], nan=0.0), p["cr_n"]))
+        thr = p["cr_thr"]
+        with np.errstate(invalid="ignore"):
+            se = _cx(m, thr); sx = _cu(m, thr / 2)
+            le = _cu(m, -thr); lx = _cx(m, -thr / 2)
+        return le, lx, se, sx, {}
+
+    pine = staticmethod(_no_pine)
+
+    def desc(p):
+        return (f"Short perpetual saat rata-rata funding {p['cr_n']} candle > {p['cr_thr'] * 100:.3f}% (short menerima funding), long saat "
+                f"< −{p['cr_thr'] * 100:.3f}%; keluar saat funding kembali normal")
