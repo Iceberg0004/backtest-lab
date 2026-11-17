@@ -25,7 +25,7 @@ FILTER_SPACE = {"sess": [0, 0, 0, 1, 2, 3, 4], "dow": [0, 0, 0, 1, 2, 3], "htf_m
                 "vol": [0, 0, 1, 2], "rsi_f": [0, 0, 1], "volf": [0, 0, 1]}
 SESS = {1: (0, 8, "Asia"), 2: (7, 16, "London"), 3: (13, 21, "New York"), 4: (13, 16, "London+NY")}
 DOW = {1: "Senin-Jumat saja", 2: "tanpa Senin", 3: "tanpa Jumat"}
-DEFAULTS = {"regime": 0, "adx_thr": 20, "sl_mode": 0, "sl_pct": 1.0, "tp_pct": 0.0, "trail_mode": 0, "tp1_r": 0.0, "be_r": 0.0,
+DEFAULTS = {"regime": 0, "adx_thr": 20, "sl_mode": 0, "sl_atr": 2.0, "tp_atr": 0.0, "trail_atr": 0.0, "sl_pct": 1.0, "tp_pct": 0.0, "trail_mode": 0, "tp1_r": 0.0, "be_r": 0.0,
             "max_bars": 0, "exit_sig": 0, "sess": 0, "dow": 0, "htf_m": 0, "htf_len": 50, "vol": 0, "rsi_f": 0, "volf": 0, "trend": 0}
 INT_KEYS = {"regime", "adx_thr", "sl_mode", "trail_mode", "max_bars", "exit_sig", "sess", "dow", "htf_m", "htf_len", "vol", "rsi_f", "volf"}
 
