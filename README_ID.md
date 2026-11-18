@@ -111,7 +111,7 @@ Sudah ada sebelumnya (tidak dibuat ulang): breakout sesi / opening range, Donchi
 
 Hasil tes kami sendiri (biaya realistis, leverage 10x, data unseen): grid, martingale, hedging, dan zone recovery **sering kena margin call** atau rugi di unseen. DCA terlihat paling "rapi" (win rate hampir 100%) tapi drawdown-nya besar dan peluang margin call di Monte Carlo tidak nol. Tidak ada satu pun yang mengalahkan strategi terbaik v5 setelah risiko dihitung. Win rate tinggi ≠ aman.
 
-## Baru di v7: SL / TP lengkap + 68 jenis strategi
+## Baru di v7: SL / TP lengkap + 69 jenis strategi
 
 **Stop loss (14 jenis + "tanpa SL")**: ATR, % harga, pips/poin, swing low/high + buffer, pivot/struktur + buffer, channel Donchian,
 band Bollinger, band Keltner, low/high candle sinyal + buffer, chandelier, Parabolic SAR, Supertrend, standar deviasi, maks rugi (uang),
@@ -133,10 +133,10 @@ Semua jenis ini ikut dicari otomatis (Acak dan Evolusi), ikut tes robust, dan ik
 dan alasan keluar. Di tab Robust ada **⚖️ Bandingkan exit**: sinyal masuk sama, 60–200 kombinasi exit, diurutkan dari data unseen
 (baris teratas cenderung terlalu bagus karena dipilih dari unseen; lebih aman pilih yang untung di in-sample dan unseen).
 
-**Pine**: versi indicator sama persis dengan aplikasi di 110/110 kasus tes (PineTS), termasuk semua jenis SL/TP/trailing baru.
-Versi strategy sama di 106/110; 4 kasus yang beda semuanya memakai TP1/TP2 (mesin order TradingView kadang menggabung / melewati satu leg).
+**Pine**: versi indicator sama persis dengan aplikasi di semua kasus tes (112) (PineTS), termasuk semua jenis SL/TP/trailing baru.
+Versi strategy sama di ±95% kasus; yang beda semuanya memakai TP1/TP2 (mesin order TradingView kadang menggabung / melewati satu leg).
 
-**Strategi yang ada (68 jenis), per kategori**
+**Strategi yang ada (69 jenis), per kategori**
 - Tren / MA: MA cross (SMA/EMA, termasuk golden/death cross), 2 MA + filter, Hull/TEMA/KAMA, ZLEMA/ALMA/T3/McGinley, MA ribbon (triple MA),
   Supertrend, Parabolic SAR, Ichimoku, Aroon, Vortex, Heikin Ashi, SSL channel, UT Bot, Range filter, Gaussian channel, LRC.
 - Momentum / osilator: RSI, RSI-2 (Connors), Stoch RSI, Williams %R, CCI, MFI, MACD, TRIX, KST, ROC, Awesome Oscillator, Elder Ray
@@ -150,10 +150,10 @@ Versi strategy sama di 106/110; 4 kasus yang beda semuanya memakai TP1/TP2 (mesi
 - Musiman: jam & hari tertentu, pergantian bulan. Patokan: beli & tahan.
 - Volume: OBV, breakout + lonjakan volume, divergensi OBV / AD / CMF, POC (sederhana).
 - Divergensi: RSI, MACD.
+- Kekuatan relatif: koin vs BTC (rasio harga, EMA cross / momentum rasio; hanya koin Binance selain BTC, Pine memakai request.security).
 - Lainnya: grid, martingale, DCA, pyramid (tab 🧮 / 📐), pairs / spread, ML, data derivatif (funding ekstrem, carry funding, open interest, order flow CVD).
 
-**Belum ada (jujur)**: kekuatan relatif vs BTC sebagai sinyal (butuh 2 aset sekaligus; sebagian bisa lewat tab pairs),
-volume profile lengkap (hanya POC sederhana dari candle), pola harmonik.
+**Belum ada (jujur)**: volume profile lengkap (hanya POC sederhana dari candle), pola harmonik.
 
 ## Jenis strategi, exit, dan filter
 - **43 jenis strategi** (fade funding, divergensi OI, order flow, dan carry khusus data derivatif crypto): MA cross, RSI, Donchian, Bollinger squeeze, MACD, Supertrend, Keltner, Stoch RSI pullback, Z-score, Hull/TEMA/KAMA cross, Ichimoku, Parabolic SAR, Heikin-Ashi, CCI, Williams %R, MFI, OBV, breakout + volume, ATR channel, pivot support/resistance, inside bar / NR7, engulfing, opening range breakout (hanya timeframe ≤ 1 jam), Aroon, Vortex, Squeeze Momentum, linear regression channel, divergence RSI, fade funding ekstrem, divergensi OI, order flow/CVD.

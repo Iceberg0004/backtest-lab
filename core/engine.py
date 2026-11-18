@@ -72,7 +72,10 @@ def drop_unavailable(p, cc):
 
 def uses_deriv(fam, p):
     """True if the strategy needs crypto derivatives data (cannot be exported to Pine)."""
-    return bool(FAMILIES[fam].get("needs")) or any(full_params(p).get(k) for k in DERIV_FILTERS)
+    return bool(set(FAMILIES[fam].get("needs") or ()) - PINE_OK_NEEDS) or any(full_params(p).get(k) for k in DERIV_FILTERS)
+
+
+PINE_OK_NEEDS = {"bench"}      # extra data that Pine can fetch itself (request.security)
 
 
 def fix_params(fam, p, tf_min=60, combo=False):
@@ -183,6 +186,12 @@ class Cache:
         for col in ("fund", "oi", "lsr"):
             if col in self.x:
                 self.avail.add(col)
+        # v7.1: benchmark close (BTC) for relative-strength strategies; forward-filled = only past values, no lookahead
+        if "bench" in df.columns:
+            b = pd.Series(df["bench"].to_numpy(float)).ffill().to_numpy()
+            if np.isfinite(b).sum() > len(b) * 0.5:
+                self.x["bench"] = b
+                self.avail.add("bench")
 
     # indicator arrays are cached, but capped in bytes (LRU) so long histories fit in ~1 GB of RAM.
     # v7: ONE budget for all caches in the process (detail page, walk-forward, multi-asset, ML... each used to get its own 32 MB).

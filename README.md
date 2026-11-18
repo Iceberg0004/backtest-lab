@@ -53,14 +53,15 @@ Rincian sumber ada di [DATA_SOURCES.md](DATA_SOURCES.md). Panduan pemakaian lebi
 - 12 new signal families (MACD divergence, pin bar, doji, Fibonacci pullback, daily VWAP, FVG, BOS/order block, liquidity sweep, hour seasonality, turn-of-month, buy & hold benchmark, crypto carry). Harmonics and news calendar skipped.
 - Tests: `python tests/test_position.py`, `python tests/e2e_multi.py binance BTCUSDT`, `cd tools/pinecheck && python make_multi.py && node multi_check.mjs`.
 
-## v7: full SL / TP toolkit + 68 strategy families
+## v7: full SL / TP toolkit + 69 strategy families
 14 stop types (+ "no SL" with warning), 10 take-profit types, TP1/TP2 partials, breakeven at X R, 8 trailing modes
 (optionally activated after X R), time stop, end-of-day / weekend close, cooldown after a loss, max trades per day,
 daily loss / profit limits, no same-direction re-entry. All searchable, in the robustness tests and in the Pine export.
 New "⚖️ Compare exits" tool (same entry, many exits, ranked by unseen data). 25 new families (TRIX, KST, Elder, AO, Fisher,
 ZLEMA/ALMA/T3/McGinley, ribbon, UT Bot, SSL, QQE, WaveTrend, Chandelier entry, Range filter, Gaussian, candle patterns, gap fill,
-level breakouts / Asian range, opening drive, Larry Williams, POC, OBV/AD/CMF divergence, %B, Donchian mid, ROC, RSI-2).
-Pine parity (PineTS): indicator 110/110; strategy 106/110 (the 4 differences all use TP1/TP2 partial orders).
+level breakouts / Asian range, opening drive, Larry Williams, POC, OBV/AD/CMF divergence, %B, Donchian mid, ROC, RSI-2;
+v7.1: relative strength vs BTC for Binance alts).
+Pine parity (PineTS): indicator 112/112; strategy ~95% (all differences use TP1/TP2 partial orders).
 See README_ID.md for the full list by category.
 
 ## Tes

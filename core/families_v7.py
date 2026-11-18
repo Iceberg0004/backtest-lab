@@ -908,3 +908,47 @@ class _:
 
     def desc(p):
         return f"RSI-2 Connors: beli saat RSI(2) < {p['r2_lo']} di atas SMA 200, keluar saat close > SMA {p['r2_ma']}; short kebalikannya"
+
+
+# ------------------------------------------------------------------ v7.1: relative strength vs a benchmark (BTC)
+def _bench(cc):
+    return cc.x["bench"]
+
+
+@fam("rs_bench", "Kekuatan relatif vs BTC (rasio harga)", {"rs_fast": (5, 30), "rs_slow": (20, 150), "rs_mode": [0, 0, 1], "trend": T4},
+     needs={"bench"})
+class _:
+    def py(p, cc):
+        f, s = p["rs_fast"], p["rs_slow"]
+        def ratio():
+            with np.errstate(invalid="ignore", divide="ignore"):
+                return cc.c / _bench(cc)
+        r = cc.get(("rs_ratio",), ratio)
+        ef = cc.get(("rs_ema", f), lambda: ind.ema(r, f))
+        if p["rs_mode"] == 0:          # ratio EMA fast vs slow: the coin starts to beat / lag BTC
+            es = cc.get(("rs_ema", s), lambda: ind.ema(r, s))
+            return _cx(ef, es), _cu(ef, es), _cu(ef, es), _cx(ef, es), {}
+        # mode 1: ratio momentum (rate of change of the ratio over rs_slow bars) crosses 0
+        def roc():
+            with np.errstate(invalid="ignore", divide="ignore"):
+                o = np.full(len(ef), NAN); o[s:] = 100 * (ef[s:] - ef[:-s]) / ef[:-s]
+            return o
+        m = cc.get(("rs_roc", f, s), roc)
+        return _cx(m, 0.0), _cu(m, 0.0), _cu(m, 0.0), _cx(m, 0.0), {}
+
+    def pine(p):
+        f, s = p["rs_fast"], p["rs_slow"]
+        out = ["rsR = close / benchC", f"rsF = ta.ema(rsR, {f})"]
+        if p["rs_mode"] == 0:
+            out += [f"rsS = ta.ema(rsR, {s})", "longEntry = ta.crossover(rsF, rsS)", "longExit = ta.crossunder(rsF, rsS)",
+                    "shortEntry = ta.crossunder(rsF, rsS)", "shortExit = ta.crossover(rsF, rsS)"]
+        else:
+            out += [f"rsM = 100 * (rsF - rsF[{s}]) / rsF[{s}]", "longEntry = ta.crossover(rsM, 0.0)", "longExit = ta.crossunder(rsM, 0.0)",
+                    "shortEntry = ta.crossunder(rsM, 0.0)", "shortExit = ta.crossover(rsM, 0.0)"]
+        return out
+
+    def desc(p):
+        if p["rs_mode"] == 0:
+            return (f"Beli saat koin mulai lebih kuat dari BTC (EMA {p['rs_fast']} rasio harga koin/BTC naik di atas EMA {p['rs_slow']}), "
+                    "short saat mulai lebih lemah")
+        return f"Beli saat momentum rasio koin/BTC ({p['rs_slow']} candle) berubah positif, short saat berubah negatif"

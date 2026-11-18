@@ -18,7 +18,11 @@ DATA = {}
 
 def data(src, sym):
     if (src, sym) not in DATA:
-        df = closed_only(SOURCES[src].get(sym, "1h", refresh=False), "1h").iloc[-N:]
+        df = closed_only(SOURCES[src].get(sym, "1h", refresh=False), "1h")
+        if src == "binance" and sym != "BTCUSDT":     # benchmark close for relative-strength families
+            b = closed_only(SOURCES["binance"].get("BTCUSDT", "1h", refresh=False), "1h")["close"].rename("bench")
+            df = df.join(b, how="left")
+        df = df.iloc[-N:]
         DATA[(src, sym)] = (df, E.Cache(df))
     return DATA[(src, sym)]
 
@@ -46,7 +50,17 @@ cases = []
 rng = np.random.default_rng(2026)
 mk = ["binance:BTCUSDT", "dukascopy:EURUSD", "dukascopy:XAUUSD"]
 for fam in E.FAMILIES:
-    if E.FAMILIES[fam].get("needs"):      # derivatives families have no Pine version
+    if set(E.FAMILIES[fam].get("needs") or ()) - E.PINE_OK_NEEDS:      # derivatives families have no Pine version
+        continue
+    if "bench" in (E.FAMILIES[fam].get("needs") or ()):
+        for r in range(max(2, PER)):
+            df, cc = data("binance", "ETHUSDT")
+            for _ in range(50):
+                p = E.drop_unavailable(E.sample_params(fam, rng, 60, combo=True), cc)
+                _, tr = E.run(fam, p, cc, 0, len(df), "both", 0.0, 0.0)
+                if len(tr["ent"]) >= 5:
+                    break
+            cases.append(("binance", "ETHUSDT", fam, p, "both"))
         continue
     for r in range(PER):
         src, sym = mk[(len(cases)) % 3].split(":")
@@ -90,7 +104,8 @@ cases.append(("dukascopy", "EURUSD", "donchian", {"entry_len": 30, "exit_len": 1
 for k, (src, sym, fam, p, d) in enumerate(cases):
     df, cc = data(src, sym)
     _, tr = E.run(fam, p, cc, 0, len(df), d, 0.0, 0.0)
-    strat, indi = to_pine(fam, p, d, "t", sym, "1h", 0.0, 1.0, "test", [("IS PF", "1.23"), ("Grade", "C")], pip=E.X.pip_size(cc.c[-1]), tf_min=cc.tf_min)
+    strat, indi = to_pine(fam, p, d, "t", sym, "1h", 0.0, 1.0, "test", [("IS PF", "1.23"), ("Grade", "C")], pip=E.X.pip_size(cc.c[-1]), tf_min=cc.tf_min,
+                          bench_vals=cc.x["bench"].tolist() if "bench" in cc.x else None)
     indi += '\nplot(goLong ? 1 : 0, "xL")\nplot(goShort ? 1 : 0, "xS")\nplot(not na(tradePnl) ? 1 : 0, "xX")\n'
     json.dump(dict(fam=fam, sym=sym, params=E.full_params(p), candles=[dict(open=r.open, high=r.high, low=r.low, close=r.close, volume=r.volume,
                                  openTime=int(t.timestamp() * 1000), closeTime=int(t.timestamp() * 1000) + 3599999)

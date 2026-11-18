@@ -188,9 +188,20 @@ def load_deriv(symbol, tf, start):
     return e[D.COLS], info
 
 
+@st.cache_data(ttl=60, show_spinner=False, max_entries=3)
+def load_bench(tf, start):
+    b = SOURCES["binance"].get("BTCUSDT", tf, start=pd.Timestamp(start, tz="UTC"), refresh=True)
+    return b["close"].rename("bench")
+
+
 @st.cache_data(ttl=5, show_spinner=False)
 def load(source, symbol, tf, start, deriv=False):
     df = SOURCES[source].get(symbol, tf, start=pd.Timestamp(start, tz="UTC"), refresh=True)
+    if source == "binance" and symbol != "BTCUSDT":
+        try:      # v7.1: BTC close for the "relative strength vs BTC" strategy
+            df = df.join(load_bench(tf, start), how="left")
+        except Exception:
+            pass
     if deriv and source == "binance":
         try:
             x, info = load_deriv(symbol, tf, start)

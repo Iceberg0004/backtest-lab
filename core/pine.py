@@ -411,7 +411,19 @@ PINE_DERIV_MSG = ("Strategi ini memakai data derivatif kripto (funding, open int
                   "tidak tersedia di Pine Script TradingView, jadi tidak bisa diekspor ke Pine.")
 
 
-def to_pine(fam, p, direction, title, symbol, tf, cost_pct, leverage=1.0, stats_note="", table_rows=None, pip=None, tf_min=None):
+BENCH_SYM = "BINANCE:BTCUSDT"
+
+
+def _bench_line(bench_vals=None):
+    if bench_vals is not None:      # parity tests only: the benchmark closes embedded as an array
+        vals = ", ".join(repr(float(x)) for x in bench_vals)
+        return f"var float[] BENCH = array.from({vals})\nbenchC = array.get(BENCH, bar_index)"
+    return (f'benchSym = "{BENCH_SYM}"  // pembanding (ganti kalau perlu)\n'
+            "benchC = request.security(benchSym, timeframe.period, close, lookahead=barmerge.lookahead_off)")
+
+
+def to_pine(fam, p, direction, title, symbol, tf, cost_pct, leverage=1.0, stats_note="", table_rows=None, pip=None, tf_min=None,
+            bench_vals=None):
     if E.uses_deriv(fam, p):
         raise NoPine(PINE_DERIV_MSG)
     p = E.full_params(p)
@@ -430,6 +442,8 @@ def to_pine(fam, p, direction, title, symbol, tf, cost_pct, leverage=1.0, stats_
 // Backtest bukan jaminan hasil di masa depan.
 """
     sig = _signals_block(fam, p)
+    if "benchC" in sig:
+        sig = _bench_line(bench_vals) + "\n" + sig
     hdr = _header_inputs(p, direction, leverage, pip, tf_min, cost_pct)
     notes = NOTES.replace("\\n", "\n")
     strat = head + notes + f"""
