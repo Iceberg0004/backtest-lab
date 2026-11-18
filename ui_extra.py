@@ -252,26 +252,35 @@ def render_basket(ctx):
     st.caption("Lolos = untung di seluruh periode, profit factor ≥ 1.1, minimal 20 trade, dan tetap untung di bagian data terbaru "
                f"({cfg['oos_pct']}% terakhir). Data aset baru diambil dulu, pertama kali bisa beberapa menit.")
     if st.button("▶️ Jalankan tes multi-aset", key=f"bb_{ctx['skey']}"):
-        from concurrent.futures import ThreadPoolExecutor
-        items, errs = [], []
-        with st.spinner(f"Mengambil data {', '.join(basket)} (sekaligus, pertama kali bisa beberapa menit)..."):
+        costs = {s_: ctx["cost_for"](s_, 1.0) for s_ in basket}      # read the cost settings here (the job runs in a thread)
+        _load, _mk, _f, _p, _cfg = ctx["load_symbol_raw"], ctx["make_cache"], o["fam"], o["params"], cfg
+        _nw = 3 if res["source"] == "dukascopy" else 5
+
+        def _basket(prog, basket=tuple(basket)):
+            from concurrent.futures import ThreadPoolExecutor
+            prog(0.05, f"Mengambil data {', '.join(basket)} (pertama kali bisa beberapa menit)...")
+
             def job(s_):
                 try:
-                    return s_, ctx["load_symbol_raw"](s_), None
+                    return s_, _load(s_), None
                 except Exception as e:
                     return s_, None, str(e)
-            with ThreadPoolExecutor(max_workers=3 if res["source"] == "dukascopy" else 5) as ex:
+            with ThreadPoolExecutor(max_workers=_nw) as ex:
                 got = list(ex.map(job, basket))
-        for s_, d, err in got:
-            if err:
-                errs.append(f"{s_}: {err}"); continue
-            if d is None or len(d) < 600:
-                errs.append(f"{s_}: data terlalu sedikit"); continue
-            cc = ctx["make_cache"](d, s_)
-            cf, ca = ctx["cost_for"](s_, float(d.close.mean()))
-            items.append((s_, cc, cf, ca))
-        t["basket"] = R.basket_test(o["fam"], o["params"], items, cfg, cfg["oos_pct"])
-        t["basket_err"] = errs
+            prog(0.6, "Menguji strategi di tiap aset...")
+            items, errs = [], []
+            for s_, d, err in got:
+                if err:
+                    errs.append(f"{s_}: {err}"); continue
+                if d is None or len(d) < 600:
+                    errs.append(f"{s_}: data terlalu sedikit"); continue
+                cf, ca = costs[s_]
+                items.append((s_, _mk(d, s_), cf, ca))
+            return dict(rows=R.basket_test(_f, _p, items, _cfg, _cfg["oos_pct"]), errs=errs)
+        BG.launch(t, ctx["skey"], "basket_job", "Tes multi-aset", _basket, dict(b=list(basket)))
+    BG.poll(t, ctx["skey"], "basket_job", "Tes multi-aset")
+    if "basket_job" in t:
+        t["basket"], t["basket_err"] = t["basket_job"]["rows"], t["basket_job"]["errs"]
     if "basket" in t:
         rows = t["basket"]
         if rows:
@@ -353,12 +362,13 @@ def render_wfo(res, dfc, cc):
     st.caption(f"Memakai jenis strategi, target, biaya dan arah yang sama dengan pencarian terakhir ({res['symbol']} {res['tf']}). "
                "Pilihan di tiap jendela = return/drawdown terbaik yang memenuhi target. Kalau tidak ada yang memenuhi target, "
                "dipakai yang terbaik saja (ditandai).")
+    _stt = res.setdefault("search_tests", {})
     if st.button("▶️ Jalankan walk-forward", type="primary"):
-        bar = st.progress(0.0, text="Jendela 1...")
-        w = R.walk_forward(dfc, cfg, nw, mode, nv, tf_ / 100, cc=cc,
-                           progress=lambda f, k, s: bar.progress(min(f, 1.0), text=f"Jendela {k}/{nw} selesai · {s:.0f} detik"))
-        bar.empty()
-        res.setdefault("search_tests", {})["wfo"] = w
+        def _wfo(prog, dfc=dfc, cfg=cfg, nw=nw, mode=mode, nv=nv, tf_=tf_, cc=cc):
+            return R.walk_forward(dfc, cfg, nw, mode, nv, tf_ / 100, cc=cc,
+                                  progress=lambda f, k, s: prog(min(f, 1.0), f"Jendela {k}/{nw} selesai · {s:.0f} detik"))
+        BG.launch(_stt, str(res.get("id", "0")), "wfo", "Walk-forward", _wfo, dict(nw=nw, mode=str(mode), nv=nv, tf=tf_, n=len(dfc)))
+    BG.poll(_stt, str(res.get("id", "0")), "wfo", "Walk-forward")
     w = res.get("search_tests", {}).get("wfo")
     if not w:
         return
@@ -406,10 +416,12 @@ def render_portfolio(res, dfc, cc):
     if len(cands) < 2:
         st.info("Butuh minimal 2 strategi yang lolos. Coba centang pilihan di atas, atau longgarkan target lalu cari lagi.")
         return
+    _stt = res.setdefault("search_tests", {})
     if st.button("▶️ Buat portofolio", type="primary"):
-        with st.spinner("Menghitung..."):
-            res.setdefault("search_tests", {})["port"] = R.portfolio(cands, cc, meta["is_start"], len(dfc), meta["split"] if meta["split"] < len(dfc) else len(dfc) - 1,
-                                                                     cfg, max_n, max_corr)
+        _a = (cands, cc, meta["is_start"], len(dfc), meta["split"] if meta["split"] < len(dfc) else len(dfc) - 1, cfg, max_n, max_corr)
+        BG.launch(_stt, str(res.get("id", "0")), "port", "Portofolio", lambda prog, _a=_a: R.portfolio(*_a),
+                  dict(k=[str(c) for c in cands][:50], n=max_n, c=max_corr))
+    BG.poll(_stt, str(res.get("id", "0")), "port", "Portofolio")
     p = res.get("search_tests", {}).get("port")
     if not p:
         return
