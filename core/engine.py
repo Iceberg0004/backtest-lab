@@ -186,7 +186,7 @@ class Cache:
 
     # indicator arrays are cached, but capped in bytes (LRU) so long histories fit in ~1 GB of RAM.
     # v7: ONE budget for all caches in the process (detail page, walk-forward, multi-asset, ML... each used to get its own 32 MB).
-    MAX_BYTES = int(float(os.environ.get("VELA_INDICATOR_CACHE_MB", "40")) * 1e6)
+    MAX_BYTES = int(float(os.environ.get("VELA_INDICATOR_CACHE_MB", "32")) * 1e6)
 
     @staticmethod
     def _nb(v):

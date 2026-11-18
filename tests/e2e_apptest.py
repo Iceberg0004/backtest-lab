@@ -178,10 +178,15 @@ if os.environ.get("MEMDUMP"):
     import gc, collections
     import numpy as _np, pandas as _pd
     gc.collect()
-    arrs = [o for o in gc.get_objects() if isinstance(o, _np.ndarray)]
+    def _is(o, t):
+        try: return isinstance(o, t)
+        except ReferenceError: return False
+    arrs = [o for o in gc.get_objects() if _is(o, _np.ndarray)]
     print("MEMDUMP live ndarrays", len(arrs), "MB", round(sum(a.nbytes for a in arrs if a.base is None) / 1e6, 1))
     from core import engine as _E
-    caches = [o for o in gc.get_objects() if isinstance(o, _E.Cache)]
+    caches = [o for o in gc.get_objects() if _is(o, _E.Cache)]
+    big = sorted(arrs, key=lambda a: -a.nbytes)[:15]
+    print("MEMDUMP biggest arrays MB", [(round(a.nbytes / 1e6, 1), str(a.dtype), a.shape) for a in big if a.base is None])
     print("MEMDUMP Cache objects", len(caches), [len(c.c) for c in caches])
     def _sz(v, seen=None, depth=0):
         seen = seen if seen is not None else set()
