@@ -31,4 +31,9 @@ sk = list(tj)[0].split("|", 1)[1]
 t = at2.session_state["tests"][sk]
 print("perm result after reconnect", "perm" in t, round(t["perm"]["p"], 3) if "perm" in t else None)
 assert "perm" in t and not at2.exception
+b = next(b for b in at2.button if b.label.startswith("▶️ Bandingkan exit")); b.click(); at2.run()
+wait(at2.session_state["tool_jobs"].values()); at2.run()
+t = at2.session_state["tests"][sk]
+print("compare exits via job", "v7cmp" in t, len(t.get("v7cmp", [])), "rows")
+assert "v7cmp" in t and not at2.exception, [e.message for e in at2.exception]
 print("TOOLS BG TEST PASSED")
