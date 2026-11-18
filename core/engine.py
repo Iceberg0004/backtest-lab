@@ -179,7 +179,7 @@ class Cache:
                 self.avail.add(col)
 
     # indicator arrays are cached, but capped in bytes (LRU) so long histories fit in ~1 GB of RAM
-    MAX_BYTES = int(float(os.environ.get("VELA_INDICATOR_CACHE_MB", "64")) * 1e6)
+    MAX_BYTES = int(float(os.environ.get("VELA_INDICATOR_CACHE_MB", "32")) * 1e6)
 
     def get(self, key, fn):
         d = self.d
