@@ -8,7 +8,15 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
-from core import engine as E, robust as R, realism as X
+from core import engine as E, robust as R, realism as X, isolate as ISO
+
+
+def forked(fn):
+    """Run fn(progress) in a forked child so the child's RAM is returned when it exits (free cloud ~1 GB)."""
+    def job(prog):
+        return ISO.run(fn, progress=prog)
+    return job
+
 
 TZ = "Asia/Jakarta"
 ss = st.session_state
@@ -256,9 +264,10 @@ def render_basket(ctx):
         _load, _mk, _f, _p, _cfg = ctx["load_symbol_raw"], ctx["make_cache"], o["fam"], o["params"], cfg
         _nw = 3 if res["source"] == "dukascopy" else 5
 
-        def _basket(prog, basket=tuple(basket)):
+        def _basket(progress=None, basket=tuple(basket)):
             from concurrent.futures import ThreadPoolExecutor
-            prog(0.05, f"Mengambil data {', '.join(basket)} (pertama kali bisa beberapa menit)...")
+            if progress:
+                progress(0.05, f"Mengambil data {', '.join(basket)} (pertama kali bisa beberapa menit)...")
 
             def job(s_):
                 try:
@@ -267,7 +276,8 @@ def render_basket(ctx):
                     return s_, None, str(e)
             with ThreadPoolExecutor(max_workers=_nw) as ex:
                 got = list(ex.map(job, basket))
-            prog(0.6, "Menguji strategi di tiap aset...")
+            if progress:
+                progress(0.6, "Menguji strategi di tiap aset...")
             items, errs = [], []
             for s_, d, err in got:
                 if err:
@@ -277,7 +287,7 @@ def render_basket(ctx):
                 cf, ca = costs[s_]
                 items.append((s_, _mk(d, s_), cf, ca))
             return dict(rows=R.basket_test(_f, _p, items, _cfg, _cfg["oos_pct"]), errs=errs)
-        BG.launch(t, ctx["skey"], "basket_job", "Tes multi-aset", _basket, dict(b=list(basket)))
+        BG.launch(t, ctx["skey"], "basket_job", "Tes multi-aset", forked(_basket), dict(b=list(basket)))
     BG.poll(t, ctx["skey"], "basket_job", "Tes multi-aset")
     if "basket_job" in t:
         t["basket"], t["basket_err"] = t["basket_job"]["rows"], t["basket_job"]["errs"]
@@ -310,12 +320,17 @@ def render_realism(ctx):
     if not E.has_target(_pp):
         st.info("Strategi ini tidak memakai take profit tetap, jadi masalah ini tidak terjadi.")
     elif st.button("▶️ Cek dengan candle 1 menit", key=f"bi_{ctx['skey']}"):
-        bar = st.progress(0.0, text="Mengambil candle 1 menit...")
-        info, _ = X.intrabar(o["fam"], o["params"], cc, ctx["is_start"], ctx["n"], cfg, res["source"], res["symbol"], res["tf"],
-                             progress=lambda f: bar.progress(min(f, 1.0), text=f"Mengambil candle 1 menit... {f * 100:.0f}%"))
-        info.pop("resolve", None)
-        t["intrabar"] = info
-        bar.empty()
+        def _ib(progress=None, fam=o["fam"], params=o["params"], cc=cc, start=ctx["is_start"], n=ctx["n"],
+                cfg=cfg, source=res["source"], symbol=res["symbol"], tf=res["tf"]):
+            def p(f):
+                if progress:
+                    progress(min(f, 1.0), f"Mengambil candle 1 menit... {f * 100:.0f}%")
+            info, _ = X.intrabar(fam, params, cc, start, n, cfg, source, symbol, tf, progress=p)
+            info.pop("resolve", None)
+            return info
+        BG.launch(t, ctx["skey"], "intrabar", "Cek candle 1 menit", forked(_ib),
+                  dict(src=res["source"], sym=res["symbol"], tf=res["tf"], fam=o["fam"]))
+    BG.poll(t, ctx["skey"], "intrabar", "Cek candle 1 menit")
     if "intrabar" in t:
         i = t["intrabar"]
         if i.get("error") and i["n_checked"] == 0 and i["n_amb"] > 0:
@@ -364,10 +379,13 @@ def render_wfo(res, dfc, cc):
                "dipakai yang terbaik saja (ditandai).")
     _stt = res.setdefault("search_tests", {})
     if st.button("▶️ Jalankan walk-forward", type="primary"):
-        def _wfo(prog, dfc=dfc, cfg=cfg, nw=nw, mode=mode, nv=nv, tf_=tf_, cc=cc):
-            return R.walk_forward(dfc, cfg, nw, mode, nv, tf_ / 100, cc=cc,
-                                  progress=lambda f, k, s: prog(min(f, 1.0), f"Jendela {k}/{nw} selesai · {s:.0f} detik"))
-        BG.launch(_stt, str(res.get("id", "0")), "wfo", "Walk-forward", _wfo, dict(nw=nw, mode=str(mode), nv=nv, tf=tf_, n=len(dfc)))
+        def _wfo(progress=None, dfc=dfc, cfg=cfg, nw=nw, mode=mode, nv=nv, tf_=tf_, cc=cc):
+            def p(f, k, s):
+                if progress:
+                    progress(min(f, 1.0), f"Jendela {k}/{nw} selesai · {s:.0f} detik")
+            return R.walk_forward(dfc, cfg, nw, mode, nv, tf_ / 100, cc=cc, progress=p)
+        BG.launch(_stt, str(res.get("id", "0")), "wfo", "Walk-forward", forked(_wfo),
+                  dict(nw=nw, mode=str(mode), nv=nv, tf=tf_, n=len(dfc)))
     BG.poll(_stt, str(res.get("id", "0")), "wfo", "Walk-forward")
     w = res.get("search_tests", {}).get("wfo")
     if not w:
@@ -419,7 +437,8 @@ def render_portfolio(res, dfc, cc):
     _stt = res.setdefault("search_tests", {})
     if st.button("▶️ Buat portofolio", type="primary"):
         _a = (cands, cc, meta["is_start"], len(dfc), meta["split"] if meta["split"] < len(dfc) else len(dfc) - 1, cfg, max_n, max_corr)
-        BG.launch(_stt, str(res.get("id", "0")), "port", "Portofolio", lambda prog, _a=_a: R.portfolio(*_a),
+        BG.launch(_stt, str(res.get("id", "0")), "port", "Portofolio",
+                  forked(lambda progress=None, _a=_a: R.portfolio(*_a)),
                   dict(k=[str(c) for c in cands][:50], n=max_n, c=max_corr))
     BG.poll(_stt, str(res.get("id", "0")), "port", "Portofolio")
     p = res.get("search_tests", {}).get("port")
