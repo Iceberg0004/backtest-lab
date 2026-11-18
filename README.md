@@ -46,10 +46,17 @@ Rincian sumber ada di [DATA_SOURCES.md](DATA_SOURCES.md). Panduan pemakaian lebi
 - **Crypto derivatives (Binance, opt-in):** funding, open interest, long/short ratios (archive from data.binance.vision, since ~Sep 2020; the live OI API keeps only ~30 days), taker buy volume from klines (full history). Used as search filters, 3 new families (funding fade, OI divergence, CVD/order flow) and ML features. Each bar uses only observations before its close. No free historical liquidation data, so none. Strategies using derivatives cannot be exported to Pine.
 - **Scan matrix** (market × TF, family × market/TF), **strategy similarity/clusters** (in-sample daily-return correlation), **broker cost presets** (examples, editable, per-market spread/swap memory) and an optional **strict textbook DSR** grade.
 
+## v6: Grid · Martingale · DCA tab
+- **Multi-position engine** (numba): cash/margin/equity per bar, stop-out (margin call) intrabar, gap fills at the open, negative-balance clamp. Modes: grid (arithmetic/geometric, long/short/neutral, range exit, recenter, basket TP/SL), DCA safety orders (3Commas style), martingale/anti-martingale on any signal family, Turtle pyramiding, hedging, zone recovery. Plus pairs/stat-arb (ADF + hedge ratio from in-sample only), 2-asset rebalancing, periodic DCA vs lump sum.
+- **Tail risk:** max exposure, max legs, time under water, Monte Carlo probability of margin call (block bootstrap), red warning. Grades are capped for blowup risk; tail-risk modes cannot reach A without passing unseen, 2x costs, neighbour settings and ≤ 1% margin-call probability.
+- Search (random/evo, in-sample only), basket test, Pine export (DCA and martingale as strategy(), grid as indicator; hedge/zone/pyramiding not exportable).
+- 12 new signal families (MACD divergence, pin bar, doji, Fibonacci pullback, daily VWAP, FVG, BOS/order block, liquidity sweep, hour seasonality, turn-of-month, buy & hold benchmark, crypto carry). Harmonics and news calendar skipped.
+- Tests: `python tests/test_position.py`, `python tests/e2e_multi.py binance BTCUSDT`, `cd tools/pinecheck && python make_multi.py && node multi_check.mjs`.
+
 ## Tes
 
 - `python tests/e2e_apptest.py binance BTCUSDT carry evo combo scan` (plus `deriv`, `strict` flags) (juga `dukascopy EURUSD carry`, `dukascopy XAUUSD evo`, `dukascopy US30 vela combo`): klik semua tombol lewat Streamlit AppTest.
-- `python tools/pinecheck/make_case.py 2 && cd tools/pinecheck && node run_all.mjs`: kecocokan Python vs Pine (PineTS), 63 kasus: semua jenis strategi, filter, dan exit.
+- `python tools/pinecheck/make_case.py 2 && cd tools/pinecheck && node run_all.mjs`: kecocokan Python vs Pine (PineTS), 85 kasus: semua jenis strategi, filter, dan exit.
 
 ## Menjalankan di komputer sendiri
 

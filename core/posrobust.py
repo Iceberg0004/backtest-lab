@@ -230,6 +230,12 @@ def grade(mode, t):
         cap = min(cap, 64); why.append("tes Monte Carlo (risiko margin call) belum dijalankan")
     if max(t["is_m"]["maxdd"], t["oos_m"]["maxdd"]) > 0.5:
         cap = min(cap, 45); why.append("drawdown pernah lebih dari 50%")
+    if t["is_m"]["net"] <= 0:
+        cap = min(cap, 49); why.append("rugi di in-sample: untung di unseen bisa cuma kebetulan")
+    oc = t["oos_m"].get("cagr")
+    if oc is not None and np.isfinite(oc) and oc < 0.03:
+        cap = min(cap, 64)
+        why.append(f"rugi di unseen ({oc * 100:.1f}% per tahun)" if oc < 0 else f"untung di unseen terlalu kecil ({oc * 100:.1f}% per tahun)")
     if mode in PS.TAIL_RISK and not (gi["oos_pass"] and gi["cost2x"] and (t.get("jitter") or 0) >= 0.8 and mc and mc["p_ruin"] <= 0.01):
         cap = min(cap, 79)
         if not why:

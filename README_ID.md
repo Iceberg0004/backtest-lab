@@ -92,8 +92,27 @@ Hasil tes kami sendiri (jujur): model ML murni di emas dan BTC 1 jam hanya sedik
 
 Hasil tes kami sendiri (BTC 1 jam, data unseen ±Feb 2024 sampai sekarang, sudah termasuk biaya): data derivatif **tidak otomatis lebih baik**. Rata-rata strategi yang memakai filter derivatif sedikit lebih baik di unseen, tapi strategi terbaik yang lolos tes tetap strategi tanpa data derivatif. Filter OI paling membantu breakout Donchian; ML dengan fitur derivatif rugi lebih kecil dari ML biasa tapi tetap rugi.
 
+## Baru di v6: Grid · Martingale · DCA (tab 🧮)
+Tab baru untuk strategi **banyak posisi sekaligus**. Mesinnya terpisah dari backtest biasa: menghitung saldo, margin, eksposur, dan **margin call (stop-out)** di setiap candle (jalur harga dalam candle: open → low → high → close untuk candle hijau, open → high → low → close untuk candle merah; gap mengisi limit order di harga open).
+- **Grid:** batas bawah/atas (% dari harga awal), jumlah grid, jarak sama (aritmetika) atau persen sama (geometrik), arah long / short / netral, stop kalau harga keluar range, geser range (recenter), tutup semua di target untung/rugi total.
+- **DCA / safety order (gaya 3Commas):** base order, safety order, deviasi, step scale, volume scale, TP dari harga rata-rata, stop loss, cooldown. Sinyal awal: selalu / RSI / tren.
+- **Martingale dan anti-martingale:** di atas sinyal strategi mana pun (ukuran ×2 setelah rugi atau setelah untung, batas langkah, dibatasi margin yang tersedia).
+- **Pyramiding (gaya Turtle):** tambah posisi tiap N×ATR, stop dari posisi terakhir.
+- **Hedging** (long dan short bersamaan) dan **zone recovery** (balik arah dengan ukuran lebih besar sampai total untung).
+- **Pairs trading / stat-arb** (tes kointegrasi ADF dan rasio lindung nilai hanya dari in-sample), **rebalancing 2 aset**, dan **DCA rutin vs beli sekali**.
+- **Laporan risiko ekor:** eksposur maks, jumlah posisi maks, drawdown terburuk, lama di bawah puncak, **Monte Carlo peluang margin call** (setahun, dari potongan acak riwayat asli), dan peringatan merah.
+- **Rapor lebih pelit untuk mode berisiko:** pernah margin call → maks 20; peluang margin call > 1% → maks 60; drawdown > 50% → maks 45; grid/DCA/martingale/hedge/zone **tidak bisa dapat A** kecuali lolos unseen, biaya 2x, setelan tetangga, dan peluang margin call ≤ 1%.
+- **Cari setelan** (acak atau evolusi, hanya in-sample, lalu dinilai di unseen) dan **uji di pasar lain**.
+- **Pine:** DCA dan martingale diekspor sebagai strategy() (DCA dicek dengan PineTS: semua deal sama di data BTC uji); grid sebagai indikator level + alert; hedging, zone recovery, dan pyramiding belum bisa diekspor.
+
+**Jenis strategi sinyal baru (12):** divergensi MACD, pin bar, doji, pullback Fibonacci, VWAP harian (mean reversion), Fair Value Gap, Break of Structure / Order Block, liquidity sweep, musiman jam, musiman awal/akhir bulan, buy & hold (pembanding), dan carry (crypto, dari funding). Semua kecuali carry punya kembaran Pine yang dicek PineTS.
+Sudah ada sebelumnya (tidak dibuat ulang): breakout sesi / opening range, Donchian (Turtle), divergensi RSI, engulfing, inside bar. Swap/carry forex diatur lewat pengaturan swap.
+**Tidak dibuat:** pola harmonik (sulit dibuat konsisten tanpa "melihat masa depan"), kalender berita (tidak ada data historis gratis yang andal).
+
+Hasil tes kami sendiri (biaya realistis, leverage 10x, data unseen): grid, martingale, hedging, dan zone recovery **sering kena margin call** atau rugi di unseen. DCA terlihat paling "rapi" (win rate hampir 100%) tapi drawdown-nya besar dan peluang margin call di Monte Carlo tidak nol. Tidak ada satu pun yang mengalahkan strategi terbaik v5 setelah risiko dihitung. Win rate tinggi ≠ aman.
+
 ## Jenis strategi, exit, dan filter
-- **31 jenis strategi** (3 terakhir khusus data derivatif crypto): MA cross, RSI, Donchian, Bollinger squeeze, MACD, Supertrend, Keltner, Stoch RSI pullback, Z-score, Hull/TEMA/KAMA cross, Ichimoku, Parabolic SAR, Heikin-Ashi, CCI, Williams %R, MFI, OBV, breakout + volume, ATR channel, pivot support/resistance, inside bar / NR7, engulfing, opening range breakout (hanya timeframe ≤ 1 jam), Aroon, Vortex, Squeeze Momentum, linear regression channel, divergence RSI, fade funding ekstrem, divergensi OI, order flow/CVD.
+- **43 jenis strategi** (fade funding, divergensi OI, order flow, dan carry khusus data derivatif crypto): MA cross, RSI, Donchian, Bollinger squeeze, MACD, Supertrend, Keltner, Stoch RSI pullback, Z-score, Hull/TEMA/KAMA cross, Ichimoku, Parabolic SAR, Heikin-Ashi, CCI, Williams %R, MFI, OBV, breakout + volume, ATR channel, pivot support/resistance, inside bar / NR7, engulfing, opening range breakout (hanya timeframe ≤ 1 jam), Aroon, Vortex, Squeeze Momentum, linear regression channel, divergence RSI, fade funding ekstrem, divergensi OI, order flow/CVD.
 - **Exit (dicoba otomatis):** stop loss ATR atau %, take profit, ambil untung 50% di TP1, stop pindah ke harga masuk (breakeven) setelah X R, trailing ATR atau chandelier, keluar setelah N candle, keluar hanya saat sinyal kebalikan.
 - **Filter konfirmasi (kalau kombinasi dicentang):** sesi Asia / London / New York / London+NY (jam UTC), hari (tanpa Senin / tanpa Jumat / hari kerja), tren timeframe besar (4 jam / harian, hanya candle besar yang sudah tutup, jadi tanpa "melihat masa depan"), volatilitas tinggi / rendah, RSI di sisi yang sama, volume di atas rata-rata, dan (crypto, kalau data derivatif aktif) funding tidak ekstrem, order flow searah, OI naik/turun.
 
@@ -102,7 +121,7 @@ Ada dua file `.pine` (Pine Script v5):
 - **strategy**: menampilkan hasil backtest di TradingView.
 - **indicator**: label Long/Short/TP1/SL/TP/Exit, bisa dipasang alert. Posisinya dihitung sendiri, **sama persis** dengan aplikasi.
 
-Keduanya punya **tabel statistik** di pojok chart (hasil uji aplikasi; versi strategy juga menampilkan hasil TradingView sendiri) dan **alert** untuk sinyal Long/Short/Exit, kena stop loss, kena take profit, dan posisi baru. Semua jenis strategi (kecuali yang memakai data derivatif), semua filter, dan semua jenis exit sudah dicek dengan PineTS (emulator Pine open-source) di 63 kasus: versi indicator sama persis dengan aplikasi. Versi strategy juga sama, kecuali trade yang SL dan TP-nya tersentuh di candle yang sama (TradingView menebak urutannya sendiri).
+Keduanya punya **tabel statistik** di pojok chart (hasil uji aplikasi; versi strategy juga menampilkan hasil TradingView sendiri) dan **alert** untuk sinyal Long/Short/Exit, kena stop loss, kena take profit, dan posisi baru. Semua jenis strategi (kecuali yang memakai data derivatif), semua filter, dan semua jenis exit sudah dicek dengan PineTS (emulator Pine open-source) di 85 kasus: versi indicator sama persis dengan aplikasi. Versi strategy juga sama, kecuali trade yang SL dan TP-nya tersentuh di candle yang sama (TradingView menebak urutannya sendiri).
 
 Caranya: buka TradingView → Pine Editor → tempel kodenya → Add to chart, di simbol dan timeframe yang sama.
 Hasil di TradingView bisa sedikit berbeda karena:
@@ -132,9 +151,10 @@ API key OANDA atau Twelve Data (opsional) diisi di Secrets Streamlit Cloud denga
 ## Batasan (penting)
 - **Backtest bukan jaminan untung.** Hasil masa lalu tidak menjamin masa depan.
 - Data derivatif hanya untuk crypto Binance, tanpa data likuidasi. Coverage OI/long-short mulai ±2020.
-- Funding dan swap adalah perkiraan (swap pakai angka yang kamu isi). Likuidasi saat memakai leverage belum dihitung.
+- Funding dan swap adalah perkiraan (swap pakai angka yang kamu isi). Likuidasi/margin call dihitung hanya di tab Grid · Martingale · DCA, dengan aturan sederhana (stop-out saat ekuitas ≤ X% margin), bukan aturan broker tertentu.
 - Skor rapor dan semua tes adalah hasil uji data lama, bukan saran trading.
 - Aturan prop firm di aplikasi hanya contoh, bukan aturan resmi perusahaan mana pun.
 - Harga Dukascopy adalah BID. Spread ditambahkan lewat pengaturan spread (pip).
 - Data gratis bisa sesekali error atau terlambat. Kalau itu terjadi, klik ulang atau tunggu sebentar.
 - Data Dukascopy hanya untuk pemakaian pribadi non-komersial (sesuai ketentuan mereka). Jangan dibagikan ulang.
+- Monte Carlo memakai potongan riwayat asli yang diacak. Kejadian yang belum pernah terjadi (misalnya crash lebih parah) tidak tercakup, jadi peluang margin call sebenarnya bisa lebih tinggi.
