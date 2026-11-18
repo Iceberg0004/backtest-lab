@@ -798,11 +798,23 @@ def restrict_exits(fam, p, pick, rng, tf_min=60, combo=False):
     return fix_params(fam, q, tf_min, combo)
 
 
-def search(df, cfg, progress=None, cc=None):
+def _best_so_far(rows, near, k=5):
+    """Small, picklable top list (in-sample only) for the live 'best so far' view."""
+    pool = sorted(rows, key=lambda r: r["is_m"]["ret_dd"], reverse=True)[:k] or \
+        sorted(near, key=lambda r: r["is_m"]["ret_dd"], reverse=True)[:k]
+    return [dict(name=FAMILIES[r["fam"]]["name"], net=float(r["is_m"]["net"]), pf=float(r["is_m"]["pf"]),
+                 dd=float(r["is_m"]["maxdd"]), wr=float(r["is_m"]["winrate"]), trades=int(r["is_m"]["trades"]),
+                 target=bool(r["is_pass"])) for r in pool]
+
+
+def search(df, cfg, progress=None, cc=None, stop=None, live=None):
     """cfg: families, n_variants, time_budget, direction, oos_pct, folds, cost_frac, cost_abs,
     min_pf, min_wr, max_dd, min_trades, min_wf, min_stab, oos_min_pf, seed,
-    mode ("ketat" | "vela"), algo ("random" | "evo"), combo (bool)."""
+    mode ("ketat" | "vela"), algo ("random" | "evo"), combo (bool).
+    stop(): optional, True = user pressed Stop -> finish quickly with what was found so far (meta['partial']=True).
+    live(top): optional, gets the best-so-far list (in-sample) every 25 variants."""
     t0 = time.time()
+    stopped = False
     cc = cc if cc is not None else Cache(df)
     n = len(df)
     split = int(n * (1 - cfg["oos_pct"] / 100.0))
@@ -830,6 +842,9 @@ def search(df, cfg, progress=None, cc=None):
     k = 0; misses = 0
     while k < cfg["n_variants"] and misses < 5000:
         if time.time() - t0 > cfg["time_budget"]:
+            break
+        if stop is not None and k % 10 == 0 and stop():
+            stopped = True
             break
         if algo == "evo" and tested >= warmup and elite and rng.random() < 0.7:
             _, fam, par = elite[int(rng.integers(0, len(elite)))]
@@ -863,12 +878,16 @@ def search(df, cfg, progress=None, cc=None):
                 del elite[n_elite:]
         if progress and k % 25 == 0:
             progress(min(1.0, k / cfg["n_variants"]), tested, len(rows))
+        if live is not None and k % 25 == 0:
+            live(_best_so_far(rows, near))
     t_search = time.time() - t0
     rows.sort(key=lambda r: r["is_m"]["ret_dd"], reverse=True)
     n_is_pass = len(rows)
     # diversity: max 3 variants with the same signal settings (differing only in exits/filters) go to stage 2,
     # so the evolutionary search cannot fill the list with near-copies
     max_deep = cfg.get("max_deep", 300 if mode == "vela" else 150)
+    if stopped:
+        max_deep = min(max_deep, 40)      # stopped: quick checks on the best 40 only, so the result comes fast
     keep, cnt = [], {}
     for r in rows:
         ck = (r["fam"], tuple((k, r["params"][k]) for k in FAMILIES[r["fam"]]["space"]))
@@ -885,6 +904,8 @@ def search(df, cfg, progress=None, cc=None):
     for r in rows:
         if time.time() - t0 > cfg["time_budget"] * 2.5 and out:
             break   # hard time cap on stage 2 (cloud)
+        if stopped and len(out) >= 10 and time.time() - t_search - t0 > 20:
+            break   # stopped by the user: at most ~20 s of quick checks
         om, _ = run(r["fam"], r["params"], cc, split, n, cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], lev=lev)
         ism = r["is_m"]
         min_oos_tr = max(3, cfg["min_trades"] * cfg["oos_pct"] / max(1, 100 - cfg["oos_pct"]) * 0.3)
@@ -902,6 +923,6 @@ def search(df, cfg, progress=None, cc=None):
     meta = dict(tested=tested, is_pass=n_is_pass, seconds=time.time() - t0, search_seconds=t_search,
                 split=split, is_start=is_start, n=n, split_time=df.index[split], start_time=df.index[is_start],
                 end_time=df.index[-1], trial_sr=np.array(trial_sr), mode=mode, algo=algo, combo=combo,
-                skipped_families=skipped_fams, n_deep=len(out),
+                skipped_families=skipped_fams, n_deep=len(out), partial=stopped,
                 trial_daily=np.vstack(trial_daily) if trial_daily else np.zeros((0, 0), np.float32))
     return out, meta, cc

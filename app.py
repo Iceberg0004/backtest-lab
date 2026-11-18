@@ -122,6 +122,8 @@ if ss.get("_tok") != _tok:
         _r = J.result(ss["res_scan"][0])
         if _r and ss["res_scan"][1] in _r[1]:
             ss.res = _r[1][ss["res_scan"][1]]
+    if ss.get("res"):
+        ss.nav_to = "📊 Hasil"      # reconnect with a finished result: open it straight away
     ss.families = [f for f in ss.families if f in E.FAMILIES] or list(E.FAMILIES)
 
 
@@ -145,12 +147,24 @@ def job_panel(jid, what):
     """Progress of a background job. Re-checks every 2 s; when it is done the whole page refreshes to show the result."""
     s_ = J.status(jid)
     if not s_ or s_["state"] not in ("antri", "jalan"):
+        ss.nav_to = "📊 Hasil"
         st.rerun()
         return
     st.progress(s_["frac"], text=s_["text"] or "Berjalan...")
     el = time.time() - (s_.get("started") or time.time())
     st.caption(f"⏳ {what} berjalan di server ({el:.0f} detik). Boleh minimize atau kunci HP: hasilnya tidak hilang. "
-               "Kalau halaman sempat terputus, buka lagi link yang sama.")
+               "Kalau halaman sempat terputus, buka lagi link yang sama. Tekan Stop kalau mau lihat hasil sementara sekarang.")
+    if s_.get("best"):
+        st.markdown("**🏁 Terbaik sementara** (data lama / in-sample, belum diuji di data unseen)")
+        st.dataframe(pd.DataFrame([{"Strategi": b["name"], "Untung %": round(b["net"] * 100, 1), "PF": round(b["pf"], 2),
+                                    "DD %": round(b["dd"] * 100, 1), "Win %": round(b["wr"] * 100), "Trade": b["trades"],
+                                    "Target": "✅" if b["target"] else "–"} for b in s_["best"]]),
+                     hide_index=True, width='stretch')
+    if s_.get("stop"):
+        st.info("⏹️ Dihentikan. Menguji cepat hasil yang sudah ketemu, sebentar lagi muncul di tab '📊 Hasil'...")
+    elif what.startswith("Pencarian"):
+        st.button("⏹️ Stop & tampilkan hasil sementara", key=f"stop_{jid}", on_click=J.request_stop, args=(jid,),
+                  width='stretch', help="Pencarian berhenti, lalu strategi yang sudah ketemu diuji cepat di data unseen dan ditampilkan.")
 
 
 # broker cost presets (EXAMPLES, always editable). Forex/gold/index: spread multiplier on the typical spread + commission.
@@ -464,8 +478,43 @@ def selected_strategy():
 # ------------------------------------------------------------------ tabs
 # (title is in the hero header at the top)
 st.caption(f"{symbol} · {tf} · sumber: {src.label} · waktu ditampilkan dalam WIB (UTC+7)")
+def _top_summary(res):
+    """Prominent result block at the top of 'Hasil': partial banner, best strategy card, top list."""
+    out, meta = res["out"], res["meta"]
+    st.markdown(f"### 🏆 Hasil: {res['symbol']} {res['tf']}")
+    if meta.get("partial"):
+        st.warning(f"⏹️ Hasil SEMENTARA: pencarian dihentikan setelah {meta['tested']:,} variasi. "
+                   "Strategi di bawah sudah diuji cepat di data unseen. Untuk hasil lengkap, jalankan lagi tanpa Stop.")
+    if not out:
+        st.info("Belum ada strategi yang memenuhi syarat dasar (untung & cukup trade). Coba longgarkan target atau ganti pasar / timeframe.")
+        return
+    order = sorted(range(len(out)), key=lambda i: (not out[i]["passed"], -out[i]["is_m"]["net"]))   # same order as the full table
+    b = out[order[0]]
+    om = b["oos_m"]
+    with st.container(border=True):
+        st.markdown(f"**{'✅ Terbaik yang lolos semua tes' if b['passed'] else '⚠️ Terbaik (belum lolos semua tes)'}:** "
+                    f"{E.FAMILIES[b['fam']]['name']} #{order[0] + 1}")
+        k = st.columns(4)
+        k[0].metric("Untung (unseen)", f"{om['net'] * 100:+.1f}%")
+        k[1].metric("Drawdown", f"{om['maxdd'] * 100:.1f}%")
+        k[2].metric("Profit factor", f"{om['pf']:.2f}")
+        k[3].metric("Win rate", f"{om['winrate'] * 100:.0f}%")
+        st.caption(f"Lolos semua tes: {sum(o['passed'] for o in out)} dari {len(out)} kandidat · {meta['tested']:,} variasi diuji. "
+                   "Hasil uji data lama, bukan saran.")
+        st.caption("⬇️ Detail lengkap, chart, trade & kode Pine strategi ini ada di bawah tabel.")
+    top = order[:5]
+    st.dataframe(pd.DataFrame([{"#": i + 1, "Strategi": E.FAMILIES[out[i]["fam"]]["name"],
+                                "Status": "✅ lolos" if out[i]["passed"] else ("⚠️ overfit" if out[i].get("overfit") else "–"),
+                                "Unseen %": round(out[i]["oos_m"]["net"] * 100, 1), "PF unseen": round(out[i]["oos_m"]["pf"], 2),
+                                "DD %": round(out[i]["oos_m"]["maxdd"] * 100, 1), "In-sample %": round(out[i]["is_m"]["net"] * 100, 1)}
+                               for i in top]), hide_index=True, width='stretch')
+    st.caption("Daftar lengkap & detail ada di bawah. Klik satu baris di tabel lengkap untuk melihat chart, trade, dan kode Pine.")
+
+
+if ss.get("nav_to"):
+    ss["nav"] = ss.pop("nav_to")       # jump to a tab (e.g. 'Hasil' when a search finishes)
 t_search, t_res, t_live, t_hist, t_adv, t_help = st.tabs(
-    ["🔬 Cari strategi", "📊 Hasil", "📈 Chart", "🕘 Riwayat", "🧰 Alat lanjutan", "📘 Panduan"])
+    ["🔬 Cari strategi", "📊 Hasil", "📈 Chart", "🕘 Riwayat", "🧰 Alat lanjutan", "📘 Panduan"], key="nav", on_change="ignore")
 ADV_TOOLS = {"scan": "🛰️ Scan banyak pasar sekaligus", "multi": "🧮 Grid · Martingale · DCA", "ml": "🤖 Machine learning",
              "wfo": "🔁 Walk-forward", "port": "🧺 Portofolio", "cmp": "💾 Simpan & bandingkan", "sig": "📡 Sinyal live"}
 with t_adv:
@@ -665,7 +714,7 @@ with t_search:
 
                     def _work(prog, dfc=dfc, cfg=cfg, cc0=cc0, carry_info=carry_info):
                         out, meta, cc1 = E.search(dfc, cfg, lambda f, t_, n_: prog(f * 0.95, f"Diuji {t_:,} variasi · lolos target in-sample: {n_}"),
-                                                  cc=cc0)
+                                                  cc=cc0, stop=lambda: J.should_stop(_jid), live=lambda top: prog(None, None, best=top))
                         prog(0.96, "Menghitung Deflated Sharpe dan peluang overfit (PBO)...")
                         r_ = dict(out=out, meta=meta, cfg=cfg, symbol=_sym, tf=_tf, source=_src, id=_jid, start=_start,
                                   carry_info=carry_info, deriv_info=_dinfo)
@@ -685,10 +734,14 @@ with t_search:
         _r = J.result(_jid)
         if _r:
             ss.res, ss.res_job, ss.sel = _r, _jid, None
+            ss.nav_to = "📊 Hasil"
+            st.rerun()
     if ss.get("res") and ss.get("res_job") == _jid and _st and _st["state"] == "selesai":
         _r = ss.res
         npass = sum(o["passed"] for o in _r["out"])
         tests_txt = "unseen, walk-forward, stabilitas" if _r["cfg"]["mode"] == "ketat" else "data unseen saja (mode Vela)"
+        if _r["meta"].get("partial"):
+            st.warning("⏹️ Hasil SEMENTARA: pencarian dihentikan lebih awal, jadi hanya sebagian variasi yang diuji.")
         st.success(f"Selesai ({_r['symbol']} {_r['tf']}): {_r['meta']['tested']:,} variasi diuji. {_r['meta']['is_pass']} lolos target "
                    f"in-sample, {npass} lolos tes ({tests_txt}). Buka tab '📊 Hasil'.")
         if npass == 0:
@@ -785,9 +838,10 @@ if ADV == "scan":
 with t_res:
     res = ss.get("res")
     if not res:
-        st.info("Belum ada hasil. Jalankan pencarian di tab 'Cari Strategi'.")
+        st.info("Belum ada hasil. Pilih pasar & timeframe, lalu tekan '🚀 Mulai cari strategi' di tab '🔬 Cari strategi'.")
     else:
         meta, cfg = res["meta"], res["cfg"]
+        _top_summary(res)
         st.caption(f"{res['symbol']} {res['tf']} · in-sample {to_wib([meta['start_time']])[0]:%d %b %Y} – "
                    f"{to_wib([meta['split_time']])[0]:%d %b %Y} · data unseen sejak {to_wib([meta['split_time']])[0]:%d %b %Y %H:%M} WIB · "
                    f"{meta['tested']:,} variasi dalam {meta['seconds']:.1f} detik")

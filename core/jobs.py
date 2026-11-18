@@ -55,6 +55,23 @@ def status(jid):
     return None
 
 
+def request_stop(jid):
+    """User pressed Stop: the job finishes early with what it has (partial result). True if the job was running."""
+    with _LOCK:
+        s = _RUN.get(jid)
+        if s is None:
+            return False
+        s["stop"] = True
+        s["text"] = "Dihentikan. Menyiapkan hasil sementara dari yang sudah ketemu..."
+        return True
+
+
+def should_stop(jid):
+    with _LOCK:
+        s = _RUN.get(jid)
+        return bool(s and s.get("stop"))
+
+
 def _meta(jid):
     try:
         m = json.load(open(_p(jid, "json")))
@@ -80,11 +97,16 @@ def start(jid, fn, label="", kind="", heavy=True, extra_meta=None):
                          started=meta["started"], label=label, kind=kind)
     json.dump(meta, open(_p(jid, "json"), "w"), default=str)
 
-    def prog(frac, text=""):
+    def prog(frac, text="", best=None):
         with _LOCK:
             s = _RUN.get(jid)
             if s is not None:
-                s["frac"] = float(max(0.0, min(1.0, frac))); s["text"] = str(text)
+                if frac is not None:
+                    s["frac"] = float(max(0.0, min(1.0, frac)))
+                if text is not None and not s.get("stop"):
+                    s["text"] = str(text)
+                if best is not None:
+                    s["best"] = best
 
     def run():
         sem = _HEAVY if heavy else None
