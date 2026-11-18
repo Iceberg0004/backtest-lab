@@ -64,15 +64,17 @@ def compare(fam, p, cc, is_start, split, n, direction, cf, ca, lev=1.0, n_combos
     cl = combos(fam, p, n_combos, tf_min=cc.tf_min)
     for i, (lbl, q) in enumerate(cl):
         q = E.drop_unavailable(q, cc)
-        im, _ = E.run(fam, q, cc, is_start, split, direction, cf, ca, lev=lev)
+        im, itr = E.run(fam, q, cc, is_start, split, direction, cf, ca, lev=lev)
+        wf, _ = E.wf_consistency(itr, is_start, split, 4)
         om, _ = E.run(fam, q, cc, split, n, direction, cf, ca, lev=lev)
-        rows.append(dict(label=lbl, params=q, is_m=im, oos_m=om, sl=int(q["sl_mode"]), tp=int(q.get("tp_mode", 0)),
+        rows.append(dict(label=lbl, params=q, is_m=im, oos_m=om, wf=float(wf), sl=int(q["sl_mode"]), tp=int(q.get("tp_mode", 0)),
                          ok=im["trades"] >= min_trades and om["trades"] >= max(3, min_trades // 3)))
         if progress and i % 5 == 0:
             progress((i + 1) / len(cl))
     def key(r):
         om = r["oos_m"]
-        return (r["ok"], om["net"] > 0 and r["is_m"]["net"] > 0, om["ret_dd"])
+        both = om["net"] > 0 and r["is_m"]["net"] > 0
+        return (r["ok"], both and r["wf"] >= 0.5, both, om["ret_dd"])
     first = rows[0]
     rest = sorted(rows[1:], key=key, reverse=True)
     return [first] + rest

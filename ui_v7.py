@@ -44,7 +44,8 @@ def render_exit_compare(ctx):
     st.markdown("#### ⚖️ Bandingkan exit")
     st.caption("Sinyal masuk tetap sama, exit diganti-ganti (semua jenis SL, TP, trailing, TP1/TP2, aturan). "
                "Diurutkan dari hasil data unseen. Hati-hati: memilih yang terbaik di unseen juga termasuk 'memilih', "
-               "jadi baris teratas cenderung terlalu bagus. Lebih aman pilih yang untung di in-sample DAN unseen.")
+               "jadi baris teratas cenderung terlalu bagus. Lebih aman pilih yang untung di in-sample DAN unseen, "
+               "dan kolom 'Walk-fwd IS %' tinggi (untung di banyak potongan data lama).")
     key = f"v7cmp_{ctx['skey']}"
     n_c = st.select_slider("Jumlah kombinasi exit", [60, 120, 200], value=120, key=f"v7n_{ctx['skey']}")
     if st.button("▶️ Bandingkan exit", key=f"v7b_{ctx['skey']}"):
@@ -53,22 +54,26 @@ def render_exit_compare(ctx):
                          cfg["cost_abs"], cfg["lev"], n_combos=n_c, min_trades=max(5, int(cfg.get("min_trades", 20)) // 2),
                          progress=lambda f: bar.progress(min(f, 1.0), text=f"Menguji kombinasi exit... {f * 100:.0f}%"))
         bar.empty()
-        st.session_state[key] = [dict(label=r["label"], is_m=r["is_m"], oos_m=r["oos_m"], ok=r["ok"], params=r["params"]) for r in rows]
+        st.session_state[key] = [dict(label=r["label"], is_m=r["is_m"], oos_m=r["oos_m"], ok=r["ok"], params=r["params"], wf=r["wf"]) for r in rows]
     rows = st.session_state.get(key)
     if not rows:
         return
     tbl = pd.DataFrame([{"Exit": r["label"],
                          "IS Net %": r["is_m"]["net"] * 100, "IS PF": r["is_m"]["pf"], "IS trade": r["is_m"]["trades"],
+                         "Walk-fwd IS %": r.get("wf", float("nan")) * 100,
                          "Unseen Net %": r["oos_m"]["net"] * 100, "Unseen PF": r["oos_m"]["pf"], "Unseen DD %": r["oos_m"]["maxdd"] * 100,
                          "Unseen trade": r["oos_m"]["trades"],
                          "Untung di dua-duanya": "✅" if r["is_m"]["net"] > 0 and r["oos_m"]["net"] > 0 and r["ok"] else ""} for r in rows])
     base = rows[0]["oos_m"]["ret_dd"]
     both = int((tbl["Untung di dua-duanya"] == "✅").iloc[1:].sum())
     beat = sum(1 for r in rows[1:] if r["ok"] and r["oos_m"]["ret_dd"] > base)
-    st.write(f"Baris 1 = exit asli. Dari {len(rows) - 1} kombinasi: {both} untung di in-sample dan unseen, {beat} lebih baik dari exit asli di unseen.")
+    rob = sum(1 for r in rows[1:] if r["ok"] and r["is_m"]["net"] > 0 and r["oos_m"]["net"] > 0 and r.get("wf", 0) >= 0.5)
+    st.write(f"Baris 1 = exit asli. Dari {len(rows) - 1} kombinasi: {both} untung di in-sample dan unseen "
+             f"({rob} juga untung di ≥50% potongan walk-forward in-sample), {beat} lebih baik dari exit asli di unseen. "
+             "Urutan: yang lolos semua dulu, lalu hasil unseen.")
     st.dataframe(tbl, hide_index=True, width='stretch', height=380,
                  column_config={k: st.column_config.NumberColumn(format="%.2f") for k in
-                                ["IS Net %", "IS PF", "Unseen Net %", "Unseen PF", "Unseen DD %"]})
+                                ["IS Net %", "IS PF", "Walk-fwd IS %", "Unseen Net %", "Unseen PF", "Unseen DD %"]})
 
     # v7.2: take one exit combination further (description, Pine code, JSON)
     st.markdown("**Pakai salah satu exit**")
