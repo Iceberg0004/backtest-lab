@@ -40,7 +40,10 @@ def scan_markets(jobs, load_fn, cfg_base, cost_fn, total_budget, progress=None, 
         if progress:
             progress(k / len(jobs), f"{sym} {tf}: mencari strategi ({len(df):,} candle)...")
         try:
-            out, meta, cc = E.search(df, cfg)
+            cc0 = E.Cache(df)
+            if src == "binance" and sym != "BTCUSDT":
+                cc0.avail.add("bench")      # relative strength vs BTC (BTC close is loaded lazily)
+            out, meta, cc = E.search(df, cfg, cc=cc0)
         except ValueError as e:
             rows.append(dict(Pasar=sym, TF=tf, Candle=len(df), Status=f"➖ {e}"))
             continue

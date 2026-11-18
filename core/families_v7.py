@@ -912,6 +912,20 @@ class _:
 
 # ------------------------------------------------------------------ v7.1: relative strength vs a benchmark (BTC)
 def _bench(cc):
+    """BTC close aligned to this data. Loaded lazily when the data came without it (multi-asset test, scan, live signals):
+    only past values (forward-filled), all-NaN = no signals if BTC data cannot be loaded."""
+    if "bench" not in cc.x:
+        b = np.full(len(cc.c), NAN)
+        try:
+            import pandas as pd
+            from .data import SOURCES, TF_MINUTES
+            tf = next((k for k, v in TF_MINUTES.items() if v == cc.tf_min), "1h")
+            idx = pd.DatetimeIndex(cc.index)
+            raw = SOURCES["binance"].get("BTCUSDT", tf, start=idx[0] - pd.Timedelta(days=2), refresh=False)["close"]
+            b = raw.reindex(idx.union(raw.index)).ffill().reindex(idx).to_numpy(float)
+        except Exception:
+            pass
+        cc.x["bench"] = b
     return cc.x["bench"]
 
 
