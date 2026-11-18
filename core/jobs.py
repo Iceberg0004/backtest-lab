@@ -75,7 +75,7 @@ def should_stop(jid):
 def _meta(jid):
     try:
         m = json.load(open(_p(jid, "json")))
-        return {k: m.get(k) for k in ("label", "kind", "started", "finished")}
+        return {k: m.get(k) for k in ("label", "kind", "started", "finished", "partial")}
     except Exception:
         return {}
 
@@ -121,6 +121,10 @@ def start(jid, fn, label="", kind="", heavy=True, extra_meta=None):
                 pickle.dump(res, f, protocol=pickle.HIGHEST_PROTOCOL)
             os.replace(tmp, _p(jid, "pkl"))
             meta["finished"] = time.time()
+            try:
+                meta["partial"] = bool(res.get("meta", {}).get("partial")) if isinstance(res, dict) else False
+            except Exception:
+                pass
             json.dump(meta, open(_p(jid, "json"), "w"), default=str)
             del res
         except Exception as e:

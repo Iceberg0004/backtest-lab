@@ -707,6 +707,12 @@ with t_search:
                             nonce=(time.time() if _force else 0))
                 cfg["seed"] = J.seed_of(_key)
                 _jid = J.job_id("search", _key)
+                _prev = J.status(_jid)
+                if _prev and _prev["state"] == "selesai" and _prev.get("partial"):
+                    # the last run with these settings was stopped early: Start means a full new run, not the partial result
+                    _key["nonce"] = time.time()
+                    cfg["seed"] = J.seed_of(_key)
+                    _jid = J.job_id("search", _key)
                 if J.status(_jid) is None:
                     cc0, carry_info = make_cache(dfc, cfg, symbol, tf)      # needs the page (cached funding data) -> before the thread
                     _dinfo = df.attrs.get("deriv_info")

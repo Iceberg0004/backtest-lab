@@ -37,4 +37,13 @@ print("tab after finish", at.session_state["nav"])
 print("summary shown", any("Hasil SEMENTARA" in w.value for w in at.warning), any(m.value.startswith("### 🏆 Hasil") for m in at.markdown))
 assert not at.exception, [e.message for e in at.exception]
 assert r["meta"]["partial"] and r["meta"]["tested"] < 20000
+# pressing Start again with the same settings after a Stop must run a NEW full job, not reuse the partial one
+at.session_state["nav"] = "🔬 Cari strategi"; at.run()
+next(b for b in at.button if b.label.startswith("🚀 Mulai cari strategi")).click(); at.run()
+jid2 = at.session_state["job_search"]
+print("restart after stop -> new job", jid2 != jid, J.status(jid2)["state"])
+assert jid2 != jid
+J.request_stop(jid2)
+while (J.status(jid2) or {}).get("state") in ("antri", "jalan"):
+    time.sleep(1)
 print("STOP TEST PASSED")
