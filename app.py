@@ -1093,8 +1093,17 @@ with t_res:
                 st.caption("Pine sekarang juga punya tabel statistik di pojok chart dan alert untuk sinyal, stop loss, take profit dan posisi baru.")
                 st.markdown("**📄 Laporan lengkap (HTML)**: chart, metrik, rapor dan kode Pine dalam satu file. Buka di browser HP/laptop.")
                 rkey = f"rep_{ctx['skey']}_{n}"
+                import ui_bg as BG
                 if st.button("Buat laporan HTML", key="mk_rep"):
-                    ss["report"] = (rkey, V.report_html(ctx, ftr, im, om, fm, g, strat, f"{E.FAMILIES[o['fam']]['name']} #{ss.sel+1}"))
+                    _name = f"{E.FAMILIES[o['fam']]['name']} #{ss.sel+1}"
+                    def _rep(prog, ctx=ctx, ftr=ftr, im=im, om=om, fm=fm, g=g, strat=strat, name=_name):
+                        prog(0.2, "Menyusun laporan HTML...")
+                        html = V.report_html(ctx, ftr, im, om, fm, g, strat, name)
+                        return html
+                    BG.launch(tt, ctx["skey"], "html_report", "Laporan HTML", _rep, dict(rkey=rkey))
+                BG.poll(tt, ctx["skey"], "html_report", "Laporan HTML")
+                if isinstance(tt.get("html_report"), str):
+                    ss["report"] = (rkey, tt["html_report"])
                 if ss.get("report") and ss["report"][0] == rkey:
                     st.download_button("⬇️ Download laporan (.html)", ss["report"][1], f"laporan_{tv_sym}_{res['tf']}_{ss.sel+1}.html",
                                        mime="text/html", width='stretch')
