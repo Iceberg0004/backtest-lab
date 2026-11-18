@@ -12,7 +12,7 @@ SL_ALL = [k for k in X.SL_TYPES if k != 14]
 
 def render_exit_pick():
     """Expander di tab cari. Kembalikan None kalau semua jenis boleh (perilaku default)."""
-    with st.expander("🎯 SL / TP lengkap (pilih jenis yang dicoba)"):
+    if st.toggle("🎯 Batasi jenis SL / TP yang dicoba", key="v7_pick_on"):
         st.caption(f"Default: semua dicoba ({len(X.SL_TYPES) - 1} jenis SL, {len(X.TP_TYPES)} jenis TP, {len(X.TRAIL_TYPES)} jenis trailing, "
                    "TP1/TP2 + breakeven, dan aturan trade). Batasi kalau kamu hanya mau jenis tertentu.")
         sl = st.multiselect("Jenis stop loss", list(X.SL_TYPES), default=SL_ALL, key="v7_sl", format_func=lambda k: X.SL_TYPES[k])
@@ -25,6 +25,8 @@ def render_exit_pick():
         ru = c3.checkbox("Aturan trade", True, key="v7_rules",
                          help="Time stop, tutup akhir hari / akhir pekan, jeda setelah rugi, maks trade per hari, batas rugi/untung harian, "
                               "tidak masuk ulang ke arah yang sama.")
+    else:
+        return None
     if not sl:
         sl = SL_ALL
     if not tp:
