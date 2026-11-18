@@ -24,19 +24,20 @@ def data(src, sym):
 
 
 def expect_strategy(tr, p):
-    """Python trades -> TradingView closed-trade records. A partial TP1 is its own record; while TP1 is still
-    pending, a stop-out fills BOTH exit orders (the 50% TP1 order also carries the stop) = two records."""
+    """Python trades -> TradingView closed-trade records. Each partial TP is its own record. A stop-out also fills every
+    partial-TP order still pending (those orders carry the stop too) = one extra record each.
+    Known: in ~4% of multi-partial cases TradingView merges/skips a leg; the indicator() twin stays exact."""
     out = []
-    tp1_on = E.full_params(p)["tp1_r"] > 0
     for k in range(len(tr["ent"])):
-        part = tr["p1b"][k] >= 0
         rec = (int(tr["ent"][k]), int(tr["ex"][k]), float(tr["ep"][k]), float(tr["xp"][k]), int(tr["amb"][k]))
-        if part:
-            out.append((int(tr["ent"][k]), int(tr["p1b"][k]), float(tr["ep"][k]), float(tr["p1p"][k]), 0))
+        done = 0
+        for b_, p_ in (("p1b", "p1p"), ("p2b", "p2p")):
+            if tr[b_][k] >= 0:
+                out.append((int(tr["ent"][k]), int(tr[b_][k]), float(tr["ep"][k]), float(tr[p_][k]), 0)); done += 1
         if tr["reason"][k] != 3:
             out.append(rec)
-            if tp1_on and not part and tr["reason"][k] == 1:
-                out.append(rec)
+            if tr["reason"][k] == 1:
+                out += [rec] * (int(tr["npart"][k]) - done)
     out.sort(key=lambda r: (r[1], r[0]))
     return out
 
@@ -65,6 +66,19 @@ exits = [
     dict(sl_mode=0, sl_atr=1.5, tp_atr=3.0, trail_atr=2.0, trail_mode=0, max_bars=12, exit_sig=1),
     dict(sl_mode=1, sl_pct=0.5, tp_pct=2.0, tp1_r=1.5, be_r=1.0, trail_atr=2.0, trail_mode=1, max_bars=96),
 ]
+# v7: every SL type, TP type, trailing type and trade rule
+v7 = [dict(sl_mode=m, sl_n=10, sl_buf=0.5, sl_pip=200.0, sl_money=150.0, sl_atr=2.0, tp_mode=1, tp_rr=2.0) for m in range(2, 15)]
+v7 += [dict(sl_mode=0, sl_atr=2.0, tp_mode=t, tp_rr=2.5, tp_atr=3.0, tp_pct=2.0, tp_pip=300.0, tp_n=20, tp_fib=1.618) for t in range(1, 10)]
+v7 += [dict(sl_mode=0, sl_atr=2.5, tp_mode=9, trail_atr=2.0, trail_mode=m, trail_pct=2.0, trail_ma=20, trail_step=1.0, trail_n=10,
+            trail_act=a) for m in range(2, 8) for a in (0.0, 1.0)]
+v7 += [dict(sl_mode=0, sl_atr=2.0, tp_mode=1, tp_rr=4.0, tp1_r=1.0, tp1_f=0.33, tp2_r=2.0, tp2_f=0.33, be_r=1.0, be_off=0.25),
+       dict(sl_mode=3, sl_n=10, sl_buf=0.2, tp_mode=1, tp_rr=3.0, tp1_r=1.5, tp1_f=0.5, ts_bars=12, eod=1),
+       dict(sl_mode=0, sl_atr=1.5, tp_mode=1, tp_rr=2.0, cool=6, max_day=1, reent=1, wkend=1),
+       dict(sl_mode=1, sl_pct=0.5, tp_mode=3, tp_pct=1.0, dloss=1.0, dprof=1.5, eod=2, max_bars=24),
+       dict(sl_mode=0, sl_atr=2.0, tp_mode=1, tp_rr=3.0, eod=3, wkend=1, cool=3)]
+for k, ex in enumerate(v7):
+    src, sym = mk[k % 3].split(":")
+    cases.append((src, sym, "ma_cross", dict(base, fast=8, slow=30, **ex), "both"))
 for k, ex in enumerate(exits):
     src, sym = mk[k % 3].split(":")
     cases.append((src, sym, "ma_cross", dict(base, **ex), "both"))
@@ -76,7 +90,7 @@ cases.append(("dukascopy", "EURUSD", "donchian", {"entry_len": 30, "exit_len": 1
 for k, (src, sym, fam, p, d) in enumerate(cases):
     df, cc = data(src, sym)
     _, tr = E.run(fam, p, cc, 0, len(df), d, 0.0, 0.0)
-    strat, indi = to_pine(fam, p, d, "t", sym, "1h", 0.0, 1.0, "test", [("IS PF", "1.23"), ("Grade", "C")])
+    strat, indi = to_pine(fam, p, d, "t", sym, "1h", 0.0, 1.0, "test", [("IS PF", "1.23"), ("Grade", "C")], pip=E.X.pip_size(cc.c[-1]), tf_min=cc.tf_min)
     indi += '\nplot(goLong ? 1 : 0, "xL")\nplot(goShort ? 1 : 0, "xS")\nplot(not na(tradePnl) ? 1 : 0, "xX")\n'
     json.dump(dict(fam=fam, sym=sym, params=E.full_params(p), candles=[dict(open=r.open, high=r.high, low=r.low, close=r.close, volume=r.volume,
                                  openTime=int(t.timestamp() * 1000), closeTime=int(t.timestamp() * 1000) + 3599999)

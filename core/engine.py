@@ -79,7 +79,7 @@ def fix_params(fam, p, tf_min=60, combo=False):
     for k, v in FAMILIES[fam]["space"].items():
         if isinstance(v, tuple):
             p[k] = int(min(max(int(p[k]), v[0]), v[1]))
-    if fam in ("ma_cross", "macd", "ma2", "macd_div") and p["fast"] >= p["slow"] * 0.8:
+    if fam in ("ma_cross", "macd", "ma2", "macd_div", "ma3") and p["fast"] >= p["slow"] * 0.8:
         p["slow"] = int(max(p["slow"], p["fast"] * 1.5 + 2))
     if fam in ("donchian", "vol_bo") and p["exit_len"] > p["entry_len"]:
         p["exit_len"] = max(3, p["entry_len"] // 2)
@@ -382,8 +382,9 @@ def simulate(o, h, l, c, atr, le, lx, se, sx, start, end, allow_long, allow_shor
     tr_ep = np.empty(n); tr_xp = np.empty(n); tr_ret = np.empty(n); tr_reason = np.empty(n, np.int64)
     tr_amb = np.zeros(n, np.int64); tr_sl = np.empty(n); tr_tp = np.empty(n); tr_carry = np.zeros(n)
     tr_p1b = np.full(n, -1, np.int64); tr_p1p = np.full(n, np.nan); tr_p2b = np.full(n, -1, np.int64); tr_p2p = np.full(n, np.nan)
-    tr_sl0 = np.empty(n)
+    tr_sl0 = np.empty(n); tr_np = np.zeros(n, np.int64)
     nt = 0
+    u1 = False; u2 = False
     pos = 0; ep = 0.0; ei = 0; stop = np.nan; stop0 = np.nan; tp = np.nan; t1 = np.nan; t2 = np.nan; bel = np.nan; acc = 0.0
     R = 0.0; cref = 0.0
     q = 1.0; real = 0.0; p1b = -1; p1p = np.nan; p2b = -1; p2p = np.nan; hh = -np.inf; ll = np.inf; be_done = False
@@ -448,7 +449,7 @@ def simulate(o, h, l, c, atr, le, lx, se, sx, start, end, allow_long, allow_shor
             eq *= (1 + r)
             tr_ent[nt] = ei; tr_ex[nt] = i; tr_dir[nt] = pos; tr_ep[nt] = ep; tr_xp[nt] = px; tr_ret[nt] = r; tr_reason[nt] = xr
             tr_sl[nt] = stop; tr_tp[nt] = tp; tr_carry[nt] = acc; tr_p1b[nt] = p1b; tr_p1p[nt] = p1p; tr_p2b[nt] = p2b; tr_p2p[nt] = p2p
-            tr_sl0[nt] = stop0
+            tr_sl0[nt] = stop0; tr_np[nt] = (1 if u1 else 0) + (1 if u2 else 0)
             nt += 1
             if day[i] != dkey:
                 dkey = day[i]; dret = 0.0
@@ -469,6 +470,9 @@ def simulate(o, h, l, c, atr, le, lx, se, sx, start, end, allow_long, allow_shor
                 tp = tpL[j] if pos == 1 else tpS[j]
                 t1 = c[j] + pos * tp1_r * R if tp1_r > 0 else np.nan
                 t2 = c[j] + pos * tp2_r * R if tp2_r > 0 else np.nan
+                # a partial target at / beyond the final target can never fill first -> off for this trade
+                u1 = tp1_r > 0 and not (not np.isnan(tp) and ((pos == 1 and t1 >= tp) or (pos == -1 and t1 <= tp)))
+                u2 = u1 and tp2_r > 0 and not (not np.isnan(tp) and ((pos == 1 and t2 >= tp) or (pos == -1 and t2 <= tp)))
                 bel = c[j] + pos * be_r * R if be_r > 0 else np.nan
                 if day[j] != ekey:
                     ekey = day[j]; ecnt = 0
@@ -478,14 +482,14 @@ def simulate(o, h, l, c, atr, le, lx, se, sx, start, end, allow_long, allow_shor
             has_tp = not np.isnan(tp)
             if pos == 1:
                 hs = l[i] <= stop
-                h1 = p1b < 0 and tp1_r > 0 and h[i] >= t1
-                h2 = p2b < 0 and tp2_r > 0 and h[i] >= t2
+                h1 = p1b < 0 and u1 and h[i] >= t1
+                h2 = p2b < 0 and u2 and h[i] >= t2
                 ht = has_tp and h[i] >= tp
                 gap = o[i] <= stop
             else:
                 hs = h[i] >= stop
-                h1 = p1b < 0 and tp1_r > 0 and l[i] <= t1
-                h2 = p2b < 0 and tp2_r > 0 and l[i] <= t2
+                h1 = p1b < 0 and u1 and l[i] <= t1
+                h2 = p2b < 0 and u2 and l[i] <= t2
                 ht = has_tp and l[i] <= tp
                 gap = o[i] >= stop
             amb = 1 if (hs and (h1 or h2 or ht) and not gap) else 0
@@ -515,7 +519,7 @@ def simulate(o, h, l, c, atr, le, lx, se, sx, start, end, allow_long, allow_shor
                 eq *= (1 + r)
                 tr_ent[nt] = ei; tr_ex[nt] = i; tr_dir[nt] = pos; tr_ep[nt] = ep; tr_xp[nt] = px; tr_ret[nt] = r; tr_reason[nt] = reason
                 tr_amb[nt] = amb; tr_sl[nt] = stop; tr_tp[nt] = tp
-                tr_carry[nt] = acc; tr_p1b[nt] = p1b; tr_p1p[nt] = p1p; tr_p2b[nt] = p2b; tr_p2p[nt] = p2p; tr_sl0[nt] = stop0
+                tr_carry[nt] = acc; tr_p1b[nt] = p1b; tr_p1p[nt] = p1p; tr_p2b[nt] = p2b; tr_p2p[nt] = p2p; tr_sl0[nt] = stop0; tr_np[nt] = (1 if u1 else 0) + (1 if u2 else 0)
                 nt += 1
                 if day[i] != dkey:
                     dkey = day[i]; dret = 0.0
@@ -577,10 +581,10 @@ def simulate(o, h, l, c, atr, le, lx, se, sx, start, end, allow_long, allow_shor
         eq *= (1 + r)
         tr_ent[nt] = ei; tr_ex[nt] = i; tr_dir[nt] = pos; tr_ep[nt] = ep; tr_xp[nt] = px; tr_ret[nt] = r; tr_reason[nt] = 3
         tr_sl[nt] = stop; tr_tp[nt] = tp; tr_carry[nt] = acc; tr_p1b[nt] = p1b; tr_p1p[nt] = p1p; tr_p2b[nt] = p2b; tr_p2p[nt] = p2p
-        tr_sl0[nt] = stop0
+        tr_sl0[nt] = stop0; tr_np[nt] = (1 if u1 else 0) + (1 if u2 else 0)
         nt += 1
     return (eq, maxdd, nt, tr_ent[:nt], tr_ex[:nt], tr_dir[:nt], tr_ep[:nt], tr_xp[:nt], tr_ret[:nt], tr_reason[:nt], eq_arr,
-            tr_amb[:nt], tr_sl[:nt], tr_tp[:nt], tr_carry[:nt], tr_p1b[:nt], tr_p1p[:nt], tr_p2b[:nt], tr_p2p[:nt], tr_sl0[:nt])
+            tr_amb[:nt], tr_sl[:nt], tr_tp[:nt], tr_carry[:nt], tr_p1b[:nt], tr_p1p[:nt], tr_p2b[:nt], tr_p2p[:nt], tr_sl0[:nt], tr_np[:nt])
 
 
 def metrics(rets, eq, maxdd):
@@ -624,10 +628,10 @@ def run(fam, p, cc, start, end, direction, cost_frac, cost_abs, want_equity=Fals
                    int(trc), float(trk), float(q["trail_act"]), int(q["max_bars"]), int(q["ts_bars"]),
                    int(q["cool"]), int(q["max_day"]), float(q["dloss"]) / 100.0, float(q["dprof"]) / 100.0, int(q["reent"]),
                    float(cost_frac), float(cost_abs), want_equity or daily, float(lev), cc.carry_long, cc.carry_short, cc.resolve)
-    (eq, maxdd, nt, ent, ex, dr, ep, xp, ret, reason, eqa, amb, sl_, tp_, carry, p1b, p1p, p2b, p2p, sl0) = res
+    (eq, maxdd, nt, ent, ex, dr, ep, xp, ret, reason, eqa, amb, sl_, tp_, carry, p1b, p1p, p2b, p2p, sl0, npart) = res
     m = metrics(ret, eq, maxdd)
     tr = dict(ent=ent, ex=ex, dir=dr, ep=ep, xp=xp, ret=ret, reason=reason, equity=eqa, amb=amb, sl=sl_, tp=tp_, carry=carry,
-              p1b=p1b, p1p=p1p, p2b=p2b, p2p=p2p, sl0=sl0)
+              p1b=p1b, p1p=p1p, p2b=p2b, p2p=p2p, sl0=sl0, npart=npart)
     if daily:
         d = daily_returns(cc, start, end, eqa)
         tr["daily"] = d

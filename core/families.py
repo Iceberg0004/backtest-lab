@@ -1140,3 +1140,4 @@ class _:
     def desc(p):
         return (f"Short perpetual saat rata-rata funding {p['cr_n']} candle > {p['cr_thr'] * 100:.3f}% (short menerima funding), long saat "
                 f"< −{p['cr_thr'] * 100:.3f}%; keluar saat funding kembali normal")
+from . import families_v7  # noqa: E402,F401  (v7 families register themselves in F)
