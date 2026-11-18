@@ -11,3 +11,7 @@ yfinance==1.8.0
 scikit-learn==1.9.1
 scipy==1.18.1
 # v5 (changing this file makes Streamlit Cloud restart the app with fresh modules)
+# v9 UI components (open source, see README credits); the app falls back to plain Streamlit if one fails to load
+streamlit-extras==1.6.0
+streamlit-shadcn-ui==1.5.0
+streamlit-lightweight-charts==0.7.20

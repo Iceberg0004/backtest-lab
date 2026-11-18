@@ -35,6 +35,7 @@ import ui_v4 as V
 import ui_v6 as V6
 import ui_v7 as V7
 import core.jobs as J
+import ui_theme as T
 for _m in list(_sys.modules.values()):   # remember the file version each local module was loaded from (see above)
     _f = getattr(_m, "__file__", None)
     if _f and os.path.abspath(_f).startswith(_HERE + os.sep) and not hasattr(_m, "_bt_mtime") and os.path.exists(_f):
@@ -66,6 +67,7 @@ st.markdown("""<style>
 }
 [data-testid="stDataFrame"] {overflow-x: auto;}
 </style>""", unsafe_allow_html=True)
+T.apply()
 TZ = "Asia/Jakarta"
 FX_SPREAD = {"EURUSD": 1.0, "GBPUSD": 1.5, "USDJPY": 1.2, "AUDUSD": 1.2, "USDCAD": 1.8, "USDCHF": 1.5,
              "NZDUSD": 1.8, "XAUUSD (Gold futures GC=F)": 3.0, "XAUUSD": 3.0, "XAGUSD": 2.5, "EURJPY": 1.5,
@@ -93,7 +95,7 @@ ss.families = [f for f in ss.families if f in E.FAMILIES]
 # ---- v8: phone browsers drop the connection when minimized. Settings, the running job and the opened result are kept on
 # the server under a token in the page URL (?s=...), so coming back continues where you were instead of starting over.
 import core.jobs as J
-PERSIST_KEYS = list(defaults) + ["start_date_saved", "custom_sym", "v7_pick_on", "v7_sl", "v7_tp", "v7_trail", "v7_multi", "v7_rules", "adv_tool",
+PERSIST_KEYS = list(defaults) + ["start_date_saved", "custom_sym", "v7_pick_on", "v7_sl", "v7_tp", "v7_trail", "v7_multi", "v7_rules", "adv_tool", "tv_on",
                                  "scan_src", "scan_tfs", "scan_var", "scan_time"]
 _tok = st.query_params.get("s")
 if not _tok:
@@ -222,7 +224,7 @@ if ss.source not in src_keys:
 def _on_source():
     ss.symbol = SOURCES[ss.source].symbols()[0]
     _restore_costs()
-st.markdown("#### 📈 Backtest Lab")
+T.hero()
 with st.container(border=True):
     _m1, _m2, _m3 = st.columns([1.3, 1.3, 0.8])
     _m1.selectbox("Sumber data", src_keys, key="source", format_func=lambda k: SOURCES[k].label, on_change=_on_source)
@@ -460,7 +462,7 @@ def selected_strategy():
 
 
 # ------------------------------------------------------------------ tabs
-st.title("📈 Backtest Lab")
+# (title is in the hero header at the top)
 st.caption(f"{symbol} · {tf} · sumber: {src.label} · waktu ditampilkan dalam WIB (UTC+7)")
 t_search, t_res, t_live, t_hist, t_adv, t_help = st.tabs(
     ["🔬 Cari strategi", "📊 Hasil", "📈 Chart", "🕘 Riwayat", "🧰 Alat lanjutan", "📘 Panduan"])
@@ -471,7 +473,11 @@ with t_adv:
                        help="Alat tambahan. Hanya alat yang dipilih yang dimuat, supaya aplikasi tetap ringan di HP.")
 
 with t_live:
-    nbars = st.select_slider("Jumlah candle di chart", [200, 500, 1000, 2000], value=500)
+    _c1, _c2 = st.columns([2, 1])
+    nbars = _c1.select_slider("Jumlah candle di chart", [200, 500, 1000, 2000], value=500)
+    if T.has_tv():
+        ss.setdefault("tv_on", True)
+        _c2.toggle("Chart gaya TradingView", key="tv_on", help="Lebih ringan & enak di HP. Matikan untuk chart lengkap dengan garis indikator.")
 
     @st.fragment(run_every=ss.refresh)
     def live():
@@ -527,7 +533,14 @@ with t_live:
         else:
             st.caption("Pilih strategi di tab 'Hasil & Detail' untuk menampilkan garis indikator dan label Long/Short di chart ini.")
         sub = df.iloc[-nbars:]
-        st.plotly_chart(candle_fig(sub, fam, p, tr, cc), width='stretch', key=f"live_{time.time()}")
+        _tv = ss.get("tv_on", True) and T.has_tv()
+        if _tv:
+            _trv = dict(tr, _offset=len(df) - len(sub)) if tr is not None else None
+            _tv = T.tv_chart(sub, _trv, height=480, key="tv_live")
+            st.caption("Chart gaya TradingView: L/S = masuk long/short, bulatan = keluar (kuning untung, abu-abu rugi). "
+                       "Garis indikator strategi ada di chart lengkap (matikan pilihan di atas).")
+        if not _tv:
+            st.plotly_chart(candle_fig(sub, fam, p, tr, cc), width='stretch', key=f"live_{time.time()}")
     live()
 
 with t_search:
@@ -827,18 +840,7 @@ with t_res:
         if ss.get("sel") is not None:
             o = res["out"][ss.sel]
             st.markdown(f"### {E.FAMILIES[o['fam']]['name']} #{ss.sel + 1}")
-            _om, _im = o["oos_m"], o["is_m"]
-            _g = U.tests_for(f"{res.get('id', '0')}_{ss.sel}").get("grade")
-            with st.container(border=True):
-                _k = st.columns(5)
-                _k[0].metric("Rapor", _g[1] if _g and _g[0] is not None else "-", help="Nilai ketahanan A-E (lihat rincian di bawah).")
-                _k[1].metric("Untung (unseen)", f"{_om['net'] * 100:+.1f}%")
-                _k[2].metric("Drawdown (unseen)", f"{_om['maxdd'] * 100:.1f}%")
-                _k[3].metric("Profit factor (unseen)", f"{_om['pf']:.2f}")
-                _k[4].metric("Win rate (unseen)", f"{_om['winrate'] * 100:.0f}%")
-                st.caption(f"'Unseen' = data terbaru yang tidak dipakai saat mencari ({_om['trades']} trade). "
-                           f"Data lama (in-sample): {_im['net'] * 100:+.1f}%, PF {_im['pf']:.2f}, {_im['trades']} trade. "
-                           "Hasil uji data lama, bukan saran.")
+            _card_slot = st.container()
             st.write(E.describe(o["fam"], o["params"], cfg["direction"]))
             V7.no_sl_warning(o["params"])
             if o["overfit"]:
@@ -878,6 +880,24 @@ with t_res:
                        make_cache=lambda d_, s_: make_cache(d_, cfg if res["source"] == "binance" else None, s_, res["tf"])[0],
                        cost_for=lambda s_, px: cost_for(res["source"], s_, px))
             U.render_report(ctx)
+            def _summary_card(slot, o=o, res=res):
+                with slot:
+                  _om, _im = o["oos_m"], o["is_m"]
+                  _g = U.tests_for(f"{res.get('id', '0')}_{ss.sel}").get("grade")
+                  if _g and _g[0] is not None:
+                      T.grade_badge(_g[1], "lolos uji" if _g[1] in ("A", "B") else ("hati-hati" if _g[1] == "C" else "lemah"),
+                                    key=f"gb_{res.get('id', '0')}_{ss.sel}")
+                  with st.container(border=True):
+                      _k = st.columns(5)
+                      _k[0].metric("Rapor", _g[1] if _g and _g[0] is not None else "-", help="Nilai ketahanan A-E (lihat rincian di bawah).")
+                      _k[1].metric("Untung (unseen)", f"{_om['net'] * 100:+.1f}%")
+                      _k[2].metric("Drawdown (unseen)", f"{_om['maxdd'] * 100:.1f}%")
+                      _k[3].metric("Profit factor (unseen)", f"{_om['pf']:.2f}")
+                      _k[4].metric("Win rate (unseen)", f"{_om['winrate'] * 100:.0f}%")
+                      st.caption(f"'Unseen' = data terbaru yang tidak dipakai saat mencari ({_om['trades']} trade). "
+                                 f"Data lama (in-sample): {_im['net'] * 100:+.1f}%, PF {_im['pf']:.2f}, {_im['trades']} trade. "
+                                 "Hasil uji data lama, bukan saran.")
+            _summary_card(_card_slot)
             d_chart, d_perf, d_ana, d_trades, d_sim, d_size, d_reg, d_meta, d_rob, d_bask, d_real, d_exp = st.tabs(
                 ["Chart", "Performance", "📐 Analitik", "Trades", "Simulation (Monte Carlo)", "💰 Ukuran posisi & Prop firm", "🌦️ Regime",
                  "🤖 Meta-label", "🧪 Uji ketahanan", "🌍 Multi-aset", "🎯 Realisme", "Export & Simpan"])

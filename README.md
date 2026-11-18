@@ -107,3 +107,18 @@ Catatan Streamlit Cloud gratis:
 - Harga Dukascopy adalah BID. Spread ditambahkan lewat pengaturan spread (pip).
 - Data gratis bisa sesekali error atau terlambat. Kalau itu terjadi, klik ulang atau tunggu sebentar.
 - Data Dukascopy hanya untuk pemakaian pribadi non-komersial (sesuai ketentuan mereka). Jangan dibagikan ulang.
+
+## v8 / v9: background jobs, mobile layout and UI components
+
+- **Searches and scans run on the server in a background job.** Minimizing the phone, locking it, or reloading the page no longer restarts the search: the page URL carries a session token (`?s=...`), so the page reattaches to the running job or loads the finished result from disk. Results are kept for 24 hours (300 MB cap); a restart of the free server clears them. The same settings never start the same job twice.
+- **Simpler layout:** market and timeframe on the main page, one big start button, advanced options folded away, 6 tabs, a result summary card (grade, unseen profit, drawdown, PF, win rate), and a history tab.
+
+### Open-source UI components (thank you)
+
+| Library | License | Used for |
+|---|---|---|
+| [streamlit-extras](https://github.com/arnaudmiribel/streamlit-extras) | Apache-2.0 | metric card styling |
+| [streamlit-shadcn-ui](https://github.com/ObservedObserver/streamlit-shadcn-ui) | MIT | grade badge |
+| [streamlit-lightweight-charts](https://github.com/freyastreamlit/streamlit-lightweight-charts) (wraps TradingView [lightweight-charts](https://github.com/tradingview/lightweight-charts), Apache-2.0) | MIT | TradingView-style candle chart with trade markers |
+
+Each one is optional at runtime: if a component fails to load, the app falls back to plain Streamlit.

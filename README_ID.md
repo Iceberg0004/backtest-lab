@@ -202,3 +202,9 @@ API key OANDA atau Twelve Data (opsional) diisi di Secrets Streamlit Cloud denga
 - Data gratis bisa sesekali error atau terlambat. Kalau itu terjadi, klik ulang atau tunggu sebentar.
 - Data Dukascopy hanya untuk pemakaian pribadi non-komersial (sesuai ketentuan mereka). Jangan dibagikan ulang.
 - Monte Carlo memakai potongan riwayat asli yang diacak. Kejadian yang belum pernah terjadi (misalnya crash lebih parah) tidak tercakup, jadi peluang margin call sebenarnya bisa lebih tinggi.
+
+## v8 / v9: pencarian jalan di server + tampilan baru
+
+- **Pencarian & scan jalan di server.** Minimize / kunci HP / muat ulang halaman tidak mengulang pencarian: alamat halaman membawa kode sesi (`?s=...`), jadi halaman tersambung lagi ke pekerjaan yang sedang jalan atau membuka hasil yang sudah selesai. Hasil disimpan 24 jam. Kalau server gratis dimulai ulang, hasil ikut hilang.
+- **Lebih simpel:** pilih pasar & timeframe di halaman utama, satu tombol besar, pengaturan lanjutan dilipat, 6 tab, kartu ringkasan hasil, dan tab Riwayat.
+- **Komponen open-source:** streamlit-extras (Apache-2.0), streamlit-shadcn-ui (MIT), streamlit-lightweight-charts (MIT, chart TradingView). Kalau komponen gagal dimuat, aplikasi otomatis memakai tampilan Streamlit biasa.
