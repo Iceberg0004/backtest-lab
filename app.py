@@ -514,7 +514,7 @@ def _top_summary(res):
 if ss.get("nav_to"):
     ss["nav"] = ss.pop("nav_to")       # jump to a tab (e.g. 'Hasil' when a search finishes)
 t_search, t_res, t_live, t_hist, t_adv, t_help = st.tabs(
-    ["🔬 Cari strategi", "📊 Hasil", "📈 Chart", "🕘 Riwayat", "🧰 Alat lanjutan", "📘 Panduan"], key="nav", on_change="ignore")
+    ["🔬 Cari strategi", "📊 Hasil", "📈 Chart", "🕘 Riwayat", "🧰 Alat lanjutan", "📘 Panduan"], key="nav", on_change="rerun")
 ADV_TOOLS = {"scan": "🛰️ Scan banyak pasar sekaligus", "multi": "🧮 Grid · Martingale · DCA", "ml": "🤖 Machine learning",
              "wfo": "🔁 Walk-forward", "port": "🧺 Portofolio", "cmp": "💾 Simpan & bandingkan", "sig": "📡 Sinyal live"}
 with t_adv:
@@ -837,8 +837,13 @@ if ADV == "scan":
 
 with t_res:
     res = ss.get("res")
+    _rs = J.status(ss.get("job_search"))
+    if _rs and _rs["state"] in ("antri", "jalan"):
+        st.info(f"⏳ Pencarian masih berjalan di server ({_rs['frac'] * 100:.0f}%). Hasil otomatis muncul di sini saat selesai. "
+                "Progres, hasil sementara & tombol Stop ada di tab '🔬 Cari strategi'.")
     if not res:
-        st.info("Belum ada hasil. Pilih pasar & timeframe, lalu tekan '🚀 Mulai cari strategi' di tab '🔬 Cari strategi'.")
+        if not (_rs and _rs["state"] in ("antri", "jalan")):
+            st.info("Belum ada hasil. Pilih pasar & timeframe, lalu tekan '🚀 Mulai cari strategi' di tab '🔬 Cari strategi'.")
     else:
         meta, cfg = res["meta"], res["cfg"]
         _top_summary(res)
