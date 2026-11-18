@@ -34,20 +34,47 @@ if "deriv" in flags:
 if "strict" in flags:
     at.checkbox(key="strict_dsr").check().run()
 if "pick" in flags:   # v7: search only with the new SL / TP types
+    at.toggle(key="v7_pick_on").set_value(True).run()
     at.multiselect(key="v7_sl").set_value([3, 4, 5, 9, 10, 11, 13]).run()
     at.multiselect(key="v7_tp").set_value([1, 5, 7, 8]).run()
 assert not at.exception, at.exception
 print("setup ok", sorted(flags), round(time.time() - t0, 1), "s")
 
 
+def wait_jobs():
+    """v8: search / scan run as background jobs; re-run the page until they are done (like the progress poller)."""
+    import core.jobs as J
+    for k in ("job_search", "job_scan"):
+        try:
+            jid = at.session_state[k]
+        except Exception:
+            continue
+        t1 = time.time()
+        while J.status(jid) and J.status(jid)["state"] in ("antri", "jalan") and time.time() - t1 < 1500:
+            time.sleep(2)
+    at.run()
+    assert not at.exception, [e.message for e in at.exception]
+
+
+def _find(label_start):
+    return next((b for b in at.button if b.label.startswith(label_start)), None)
+
+
 def click(label_start):
-    for b in at.button:
-        if b.label.startswith(label_start):
-            b.click()
-            at.run()
-            assert not at.exception, [e.message for e in at.exception]
-            return True
-    raise AssertionError(f"button not found: {label_start} :: {[b.label for b in at.button]}")
+    b = _find(label_start)
+    if b is None:      # v8: advanced tools are behind the 'Alat lanjutan' picker
+        for tool in ["scan", "multi", "ml", "wfo", "port", "cmp", "sig"]:
+            at.selectbox(key="adv_tool").set_value(tool).run()
+            b = _find(label_start)
+            if b is not None:
+                break
+    if b is None:
+        raise AssertionError(f"button not found: {label_start} :: {[b.label for b in at.button]}")
+    b.click()
+    at.run()
+    assert not at.exception, [e.message for e in at.exception]
+    wait_jobs()
+    return True
 
 
 click("🚀 Mulai cari strategi")
@@ -163,6 +190,7 @@ at.run()
 t = at.session_state["tests"][key]
 print("FINAL grade", t.get("grade"), "strict_pass", t.get("strict_pass"))
 if "scan" in flags:
+    at.selectbox(key="adv_tool").set_value("scan").run()
     at.multiselect(key="scan_tfs").set_value(["1h"]).run()
     at.select_slider(key="scan_var").set_value(500).run()
     at.select_slider(key="scan_time").set_value(120).run()

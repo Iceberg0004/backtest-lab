@@ -8,9 +8,17 @@ import hashlib, json, os, pickle, threading, time, traceback, uuid
 JOB_DIR = os.environ.get("VELA_JOB_DIR", "/tmp/vela_jobs")
 TTL = float(os.environ.get("VELA_JOB_TTL_H", "24")) * 3600
 MAX_MB = float(os.environ.get("VELA_JOB_MAX_MB", "300"))
-_RUN: dict = {}                 # id -> live state of jobs started by THIS server process
-_LOCK = threading.Lock()
-_HEAVY = threading.Semaphore(1)  # one heavy job at a time
+# The registry lives in a tiny holder module (no __file__) so it survives app.py dropping and re-importing our own
+# modules after a code update: a running job thread and the page must keep seeing the same dict / locks.
+import sys as _sys, types as _types
+_S = _sys.modules.get("_bt_jobs_state")
+if _S is None:
+    _S = _types.ModuleType("_bt_jobs_state")
+    _S.RUN, _S.LOCK, _S.HEAVY = {}, threading.Lock(), threading.Semaphore(1)
+    _sys.modules["_bt_jobs_state"] = _S
+_RUN: dict = _S.RUN              # id -> live state of jobs started by THIS server process
+_LOCK = _S.LOCK
+_HEAVY = _S.HEAVY                # one heavy job at a time
 
 
 def _dir():

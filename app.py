@@ -34,6 +34,7 @@ import ui_extra as U
 import ui_v4 as V
 import ui_v6 as V6
 import ui_v7 as V7
+import core.jobs as J
 for _m in list(_sys.modules.values()):   # remember the file version each local module was loaded from (see above)
     _f = getattr(_m, "__file__", None)
     if _f and os.path.abspath(_f).startswith(_HERE + os.sep) and not hasattr(_m, "_bt_mtime") and os.path.exists(_f):
@@ -693,17 +694,19 @@ def _open_scan(key):
 
 if ADV == "scan":
     with t_adv:
-        st.markdown("Cari strategi di **banyak pasar & timeframe sekaligus** dengan pengaturan yang sama seperti tab 'Cari Strategi' "
+        st.markdown("Cari strategi di **banyak pasar & timeframe sekaligus** dengan pengaturan yang sama seperti tab '🔬 Cari strategi' "
                     "(target, mode, cara mencari, jenis strategi, biaya). Hasilnya diurutkan dalam satu tabel.")
         sc1, sc2 = st.columns(2)
+        for _k, _v in (("scan_tfs", ["1h", "4h"]), ("scan_var", 1000), ("scan_time", 300)):
+            ss.setdefault(_k, _v)
         scan_src = sc1.selectbox("Sumber", ["binance", "dukascopy"], format_func=lambda k: SOURCES[k].label, key="scan_src")
         all_syms = SOURCES[scan_src].symbols()
         dflt = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"] if scan_src == "binance" else ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "US30", "NAS100"]
         scan_syms = sc1.multiselect("Pasar", all_syms, default=[x for x in dflt if x in all_syms], key=f"scan_syms_{scan_src}")
-        scan_tfs = sc2.multiselect("Timeframe", ["5m", "15m", "30m", "1h", "4h", "1d"], default=["1h", "4h"], key="scan_tfs")
+        scan_tfs = sc2.multiselect("Timeframe", ["5m", "15m", "30m", "1h", "4h", "1d"], key="scan_tfs")
         sc3, sc4 = st.columns(2)
-        scan_var = sc3.select_slider("Variasi per pasar", [300, 500, 1000, 2000, 3000], value=1000, key="scan_var")
-        scan_time = sc4.select_slider("Batas waktu total (detik)", [60, 120, 300, 600, 900], value=300, key="scan_time")
+        scan_var = sc3.select_slider("Variasi per pasar", [300, 500, 1000, 2000, 3000], key="scan_var")
+        scan_time = sc4.select_slider("Batas waktu total (detik)", [60, 120, 300, 600, 900], key="scan_time")
         n_jobs = len(scan_syms) * len(scan_tfs)
         st.caption(f"{n_jobs} kombinasi pasar × timeframe. Riwayat yang dipakai: 5m 180 hari, 15m 1 tahun, 30m 2 tahun, 1h 4 tahun, "
                    "4h 8 tahun, 1d semua. Unduhan pertama tiap pasar butuh waktu; di server gratis pilih sedikit pasar dulu.")
