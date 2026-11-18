@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from numba import njit
 from . import indicators as ind
+from . import exits as X
 
 # ------------------------------------------------------------------ families (see core/families.py)
 from .families import F as FAMILIES
@@ -16,6 +17,7 @@ EXIT_SPACE = {"sl_mode": [0, 0, 0, 1], "sl_atr": [1.0, 1.5, 2.0, 2.5, 3.0, 4.0],
               "trail_atr": [0.0, 0.0, 2.0, 3.0, 4.0], "trail_mode": [0, 1],
               "tp1_r": [0.0, 0.0, 0.0, 1.0, 1.5], "be_r": [0.0, 0.0, 0.0, 1.0, 1.5, 2.0],
               "max_bars": [0, 0, 0, 12, 24, 48, 96], "exit_sig": [0, 0, 1]}
+EXIT_SPACE.update(X.SPACE)        # v7: all SL / TP / trailing / trade-management types (see core/exits.py)
 TP1_FRAC = 0.5
 # searchable market-regime filter (every family)
 REGIME_SPACE = {"regime": [0, 0, 1, 2], "adx_thr": [20, 25]}
@@ -31,8 +33,9 @@ DOW = {1: "Senin-Jumat saja", 2: "tanpa Senin", 3: "tanpa Jumat"}
 DEFAULTS = {"regime": 0, "adx_thr": 20, "sl_mode": 0, "sl_atr": 2.0, "tp_atr": 0.0, "trail_atr": 0.0, "sl_pct": 1.0, "tp_pct": 0.0, "trail_mode": 0, "tp1_r": 0.0, "be_r": 0.0,
             "max_bars": 0, "exit_sig": 0, "sess": 0, "dow": 0, "htf_m": 0, "htf_len": 50, "vol": 0, "rsi_f": 0, "volf": 0, "trend": 0,
             "fund_f": 0, "flow_f": 0, "oi_f": 0}
+DEFAULTS.update(X.DEFAULTS)
 INT_KEYS = {"regime", "adx_thr", "sl_mode", "trail_mode", "max_bars", "exit_sig", "sess", "dow", "htf_m", "htf_len", "vol", "rsi_f", "volf",
-            "fund_f", "flow_f", "oi_f"}
+            "fund_f", "flow_f", "oi_f"} | X.INT_KEYS
 
 
 def full_params(p):
@@ -81,10 +84,12 @@ def fix_params(fam, p, tf_min=60, combo=False):
     if fam in ("donchian", "vol_bo") and p["exit_len"] > p["entry_len"]:
         p["exit_len"] = max(3, p["entry_len"] // 2)
     # partial TP only makes sense below the final target
-    tp_u = p["tp_atr"] if p.get("sl_mode", 0) == 0 else p["tp_pct"]
-    sl_u = p["sl_atr"] if p.get("sl_mode", 0) == 0 else p["sl_pct"]
-    if p.get("tp1_r", 0) > 0 and tp_u > 0 and p["tp1_r"] * sl_u >= tp_u:
-        p["tp1_r"] = 0.0
+    if p.get("tp_mode", 0) == 0 and p.get("sl_mode", 0) in (0, 1):
+        tp_u = p["tp_atr"] if p.get("sl_mode", 0) == 0 else p["tp_pct"]
+        sl_u = p["sl_atr"] if p.get("sl_mode", 0) == 0 else p["sl_pct"]
+        if p.get("tp1_r", 0) > 0 and tp_u > 0 and p["tp1_r"] * sl_u >= tp_u:
+            p["tp1_r"] = 0.0
+    X.fix(p)
     if not combo:
         for k in FILTER_SPACE:
             p[k] = DEFAULTS[k]
@@ -323,34 +328,14 @@ def describe(fam, p, direction="both"):
     if p.get("oi_f"):
         f.append("open interest naik 24 candle" if p["oi_f"] == 1 else "open interest turun 24 candle")
     flt = (" Konfirmasi: " + ", ".join(f) + ".") if f else ""
-    if p["sl_mode"] == 1:
-        ex = f" Stop loss {p['sl_pct']}%"
-        ex += f", take profit {p['tp_pct']}%" if p["tp_pct"] > 0 else ", tanpa take profit tetap"
-    else:
-        ex = f" Stop loss {p['sl_atr']} x ATR"
-        ex += f", take profit {p['tp_atr']} x ATR" if p["tp_atr"] > 0 else ", tanpa take profit tetap"
-    if p["tp1_r"] > 0:
-        ex += f", ambil untung 50% di {p['tp1_r']}R"
-    if p["be_r"] > 0:
-        ex += f", stop pindah ke harga masuk setelah {p['be_r']}R"
-    if p["trail_atr"] > 0:
-        ex += f", trailing {'chandelier' if p['trail_mode'] == 1 else 'ATR'} {p['trail_atr']} x ATR"
-    if p["max_bars"] > 0:
-        ex += f", keluar paksa setelah {p['max_bars']} candle"
-    if p["exit_sig"] == 1:
-        ex += ", keluar hanya saat sinyal kebalikan"
+    ex = " " + X.describe(p)
     return f"{core}.{flt}{ex}. Arah: {d}."
 
 
-def exit_args(p, cc):
-    """Simulator exit inputs (unit array + multipliers) from parameters."""
-    p = full_params(p)
-    if p["sl_mode"] == 1:
-        unit, sl, tp = cc.pct_unit, p["sl_pct"], p["tp_pct"]
-    else:
-        unit, sl, tp = cc.atr, p["sl_atr"], p["tp_atr"]
-    return (unit, float(sl), float(tp), float(p["trail_atr"]), int(p["trail_mode"]), float(p["tp1_r"]) * sl,
-            float(TP1_FRAC), float(p["be_r"]) * sl, int(p["max_bars"]))
+def stop_dist(p, cc, lev=1.0):
+    """Initial stop distance (price units) for a long / short signal at every bar."""
+    lv = X.levels(full_params(p), cc, lev)
+    return lv["RL"], lv["RS"]
 
 
 # ------------------------------------------------------------------ simulator
@@ -362,27 +347,47 @@ def _rr(pos, ep, px, cf, ca):
 
 
 @njit(cache=True)
-def simulate(o, h, l, c, atr, unit, le, lx, se, sx, start, end, allow_long, allow_short,
-             sl_k, tp_k, tr_k, tr_mode, tp1_k, tp1_frac, be_k, max_bars,
+def _tmax(stop, lv, pos):
+    """Move a stop only in the trade's favour (NaN stop = no stop yet)."""
+    if np.isnan(lv):
+        return stop
+    if np.isnan(stop):
+        return lv
+    return max(stop, lv) if pos == 1 else min(stop, lv)
+
+
+@njit(cache=True)
+def simulate(o, h, l, c, atr, le, lx, se, sx, start, end, allow_long, allow_short,
+             RL, RS, tpL, tpS, stL, stS, trL, trS, fx, nb, day,
+             sl_none, tp1_r, tp1_f, tp2_r, tp2_f, be_r, be_off, tr_code, tr_k, tr_act, max_bars, ts_bars,
+             cool, max_day, dloss, dprof, reent,
              cost_frac, cost_abs, want_equity, lev, carry_l, carry_s, resolve):
-    """Bar-by-bar simulator.
-    - Signals at the close of bar j fill at the OPEN of bar j+1 (same as Pine strategy() default).
-    - Stop / targets use each bar's high/low. If the stop and a target are both touched inside one bar,
-      the stop is assumed first (conservative) unless resolve[i] == 1 (1-minute data showed the target first).
-    - unit = ATR or 1% of price; stop = sl_k units, final target = tp_k units, partial target tp1_k units
-      (closes tp1_frac of the position), breakeven after be_k units, trailing tr_k x ATR
-      (tr_mode 0 = from each bar's high/low, 1 = chandelier from the highest high / lowest low since entry),
-      time exit after max_bars bars (filled at the next open).
-    - carry_l / carry_s: holding cost per bar (funding / swap), charged at bar close on the open size."""
+    """Bar-by-bar simulator (v7).
+    - Decisions use bar j = i-1 (closed); orders fill at the OPEN of bar i (same as Pine strategy() default).
+    - Initial stop = c[j] -/+ R (RL / RS arrays from core/exits.py), final target tpL / tpS (NaN = none),
+      partial targets TP1 / TP2 at tp1_r / tp2_r x R closing tp1_f / tp2_f of the ORIGINAL size.
+    - Intrabar order: stop first (conservative) unless resolve[i] == 1 (1-minute data showed the targets first),
+      then TP1, TP2, final target.
+    - Bar close: carry, mark-to-market, SL line (stL/stS, e.g. PSAR / Supertrend / Donchian stop), trailing mode
+      (tr_code 1 ATR from bar high/low, 2 chandelier since entry, 3 % from peak, 4 line trL/trS, 5 step per tr_k R;
+      only after the trade gained tr_act R), breakeven after be_r R (stop to entry + be_off R).
+    - Exits at next open: opposite signal (reverse), exit signal, max_bars, time stop (not in profit after ts_bars),
+      fx (end of day / session / weekend).
+    - Entry rules: nb blocks entries, cooldown after a loss, max entries per day, daily loss limit / profit target
+      (realised, incl. costs and leverage, by UTC day of the signal bar), reent = no re-entry in the same direction
+      until an opposite signal."""
     n = end - start
     eq_arr = np.empty(n if want_equity else 1)
     tr_ent = np.empty(n, np.int64); tr_ex = np.empty(n, np.int64); tr_dir = np.empty(n, np.int64)
     tr_ep = np.empty(n); tr_xp = np.empty(n); tr_ret = np.empty(n); tr_reason = np.empty(n, np.int64)
     tr_amb = np.zeros(n, np.int64); tr_sl = np.empty(n); tr_tp = np.empty(n); tr_carry = np.zeros(n)
-    tr_p1b = np.full(n, -1, np.int64); tr_p1p = np.full(n, np.nan)
+    tr_p1b = np.full(n, -1, np.int64); tr_p1p = np.full(n, np.nan); tr_p2b = np.full(n, -1, np.int64); tr_p2p = np.full(n, np.nan)
+    tr_sl0 = np.empty(n)
     nt = 0
-    pos = 0; ep = 0.0; ei = 0; stop = np.nan; tp = np.nan; tp1 = np.nan; bel = np.nan; acc = 0.0
-    q = 1.0; real = 0.0; p1b = -1; p1p = np.nan; hh = -np.inf; ll = np.inf; be_done = False
+    pos = 0; ep = 0.0; ei = 0; stop = np.nan; stop0 = np.nan; tp = np.nan; t1 = np.nan; t2 = np.nan; bel = np.nan; acc = 0.0
+    R = 0.0; cref = 0.0
+    q = 1.0; real = 0.0; p1b = -1; p1p = np.nan; p2b = -1; p2p = np.nan; hh = -np.inf; ll = np.inf; be_done = False
+    dkey = -1; dret = 0.0; ekey = -1; ecnt = 0; last_loss = -1000000000; block_dir = 0
     eq = 1.0; peak = 1.0; maxdd = 0.0
     if want_equity:
         eq_arr[0] = 1.0
@@ -391,7 +396,23 @@ def simulate(o, h, l, c, atr, unit, le, lx, se, sx, start, end, allow_long, allo
         new_dir = 0
         exit_now = False
         xr = 0
+        # entry gate from the state BEFORE anything happens at this open
+        if block_dir == 1 and se[j]:
+            block_dir = 0
+        elif block_dir == -1 and le[j]:
+            block_dir = 0
+        gate = not nb[j]
+        if cool > 0 and j - last_loss < cool:
+            gate = False
+        if max_day > 0 and day[j] == ekey and ecnt >= max_day:
+            gate = False
+        if dkey == day[j]:
+            if dloss > 0 and dret <= -dloss:
+                gate = False
+            if dprof > 0 and dret >= dprof:
+                gate = False
         timeup = max_bars > 0 and pos != 0 and (j - ei + 1) >= max_bars
+        tstop = ts_bars > 0 and pos != 0 and (j - ei + 1) >= ts_bars and pos * (c[j] - ep) <= 0
         if pos == 1:
             if allow_short and se[j]:
                 exit_now = True; new_dir = -1
@@ -399,6 +420,10 @@ def simulate(o, h, l, c, atr, unit, le, lx, se, sx, start, end, allow_long, allo
                 exit_now = True
             elif timeup:
                 exit_now = True; xr = 4
+            elif tstop:
+                exit_now = True; xr = 6
+            elif fx[j]:
+                exit_now = True; xr = 5
         elif pos == -1:
             if allow_long and le[j]:
                 exit_now = True; new_dir = 1
@@ -406,40 +431,64 @@ def simulate(o, h, l, c, atr, unit, le, lx, se, sx, start, end, allow_long, allo
                 exit_now = True
             elif timeup:
                 exit_now = True; xr = 4
+            elif tstop:
+                exit_now = True; xr = 6
+            elif fx[j]:
+                exit_now = True; xr = 5
         else:
             if allow_long and le[j]:
                 new_dir = 1
             elif allow_short and se[j]:
                 new_dir = -1
+        if new_dir != 0 and (not gate or new_dir == block_dir or fx[j]):
+            new_dir = 0
         if exit_now:
             px = o[i]
             r = (real + q * _rr(pos, ep, px, cost_frac, cost_abs) - acc) * lev
             eq *= (1 + r)
             tr_ent[nt] = ei; tr_ex[nt] = i; tr_dir[nt] = pos; tr_ep[nt] = ep; tr_xp[nt] = px; tr_ret[nt] = r; tr_reason[nt] = xr
-            tr_sl[nt] = stop; tr_tp[nt] = tp; tr_carry[nt] = acc; tr_p1b[nt] = p1b; tr_p1p[nt] = p1p
+            tr_sl[nt] = stop; tr_tp[nt] = tp; tr_carry[nt] = acc; tr_p1b[nt] = p1b; tr_p1p[nt] = p1p; tr_p2b[nt] = p2b; tr_p2p[nt] = p2p
+            tr_sl0[nt] = stop0
             nt += 1
+            if day[i] != dkey:
+                dkey = day[i]; dret = 0.0
+            dret += r
+            if r < 0:
+                last_loss = i
+            if reent == 1:
+                block_dir = pos
             pos = 0
-        if new_dir != 0 and not np.isnan(atr[j]) and not np.isnan(unit[j]):
-            pos = new_dir; ep = o[i]; ei = i; acc = 0.0; q = 1.0; real = 0.0; p1b = -1; p1p = np.nan
-            hh = -np.inf; ll = np.inf; be_done = False
-            u = unit[j]
-            stop = c[j] - pos * sl_k * u
-            tp = c[j] + pos * tp_k * u if tp_k > 0 else np.nan
-            tp1 = c[j] + pos * tp1_k * u if tp1_k > 0 else np.nan
-            bel = c[j] + pos * be_k * u if be_k > 0 else np.nan
-        # ---- 2) intrabar stop / partial target / final target
+        if new_dir != 0:
+            Rj = RL[j] if new_dir == 1 else RS[j]
+            if not np.isnan(atr[j]) and not np.isnan(Rj):
+                pos = new_dir; ep = o[i]; ei = i; acc = 0.0; q = 1.0; real = 0.0; p1b = -1; p1p = np.nan; p2b = -1; p2p = np.nan
+                hh = -np.inf; ll = np.inf; be_done = False
+                R = Rj; cref = c[j]
+                stop0 = c[j] - pos * R
+                stop = np.nan if sl_none else stop0
+                tp = tpL[j] if pos == 1 else tpS[j]
+                t1 = c[j] + pos * tp1_r * R if tp1_r > 0 else np.nan
+                t2 = c[j] + pos * tp2_r * R if tp2_r > 0 else np.nan
+                bel = c[j] + pos * be_r * R if be_r > 0 else np.nan
+                if day[j] != ekey:
+                    ekey = day[j]; ecnt = 0
+                ecnt += 1
+        # ---- intrabar stop / partial targets / final target
         if pos != 0:
+            has_tp = not np.isnan(tp)
             if pos == 1:
                 hs = l[i] <= stop
-                h1 = p1b < 0 and tp1_k > 0 and h[i] >= tp1
-                ht = tp_k > 0 and h[i] >= tp
+                h1 = p1b < 0 and tp1_r > 0 and h[i] >= t1
+                h2 = p2b < 0 and tp2_r > 0 and h[i] >= t2
+                ht = has_tp and h[i] >= tp
                 gap = o[i] <= stop
             else:
                 hs = h[i] >= stop
-                h1 = p1b < 0 and tp1_k > 0 and l[i] <= tp1
-                ht = tp_k > 0 and l[i] <= tp
+                h1 = p1b < 0 and tp1_r > 0 and l[i] <= t1
+                h2 = p2b < 0 and tp2_r > 0 and l[i] <= t2
+                ht = has_tp and l[i] <= tp
                 gap = o[i] >= stop
-            amb = 1 if (hs and (h1 or ht) and not gap) else 0
+            amb = 1 if (hs and (h1 or h2 or ht) and not gap) else 0
             targets_first = amb == 1 and resolve[i] == 1
             closed = False
             reason = 0; px = 0.0
@@ -448,9 +497,13 @@ def simulate(o, h, l, c, atr, unit, le, lx, se, sx, start, end, allow_long, allo
                 reason = 1; closed = True
             else:
                 if h1:
-                    p1p = max(o[i], tp1) if pos == 1 else min(o[i], tp1)
-                    real += tp1_frac * _rr(pos, ep, p1p, cost_frac, cost_abs)
-                    q = 1.0 - tp1_frac; p1b = i
+                    p1p = max(o[i], t1) if pos == 1 else min(o[i], t1)
+                    real += tp1_f * _rr(pos, ep, p1p, cost_frac, cost_abs)
+                    q = 1.0 - tp1_f; p1b = i
+                if h2 and p1b >= 0:
+                    p2p = max(o[i], t2) if pos == 1 else min(o[i], t2)
+                    real += tp2_f * _rr(pos, ep, p2p, cost_frac, cost_abs)
+                    q = 1.0 - tp1_f - tp2_f; p2b = i
                 if ht:
                     px = max(o[i], tp) if pos == 1 else min(o[i], tp)
                     reason = 2; closed = True
@@ -461,33 +514,54 @@ def simulate(o, h, l, c, atr, unit, le, lx, se, sx, start, end, allow_long, allo
                 r = (real + q * _rr(pos, ep, px, cost_frac, cost_abs) - acc) * lev
                 eq *= (1 + r)
                 tr_ent[nt] = ei; tr_ex[nt] = i; tr_dir[nt] = pos; tr_ep[nt] = ep; tr_xp[nt] = px; tr_ret[nt] = r; tr_reason[nt] = reason
-                tr_amb[nt] = amb; tr_sl[nt] = stop; tr_tp[nt] = tp1 if (tp1_k > 0 and (p1b < 0 or p1b == i)) else tp
-                tr_carry[nt] = acc; tr_p1b[nt] = p1b; tr_p1p[nt] = p1p
+                tr_amb[nt] = amb; tr_sl[nt] = stop; tr_tp[nt] = tp
+                tr_carry[nt] = acc; tr_p1b[nt] = p1b; tr_p1p[nt] = p1p; tr_p2b[nt] = p2b; tr_p2p[nt] = p2p; tr_sl0[nt] = stop0
                 nt += 1
+                if day[i] != dkey:
+                    dkey = day[i]; dret = 0.0
+                dret += r
+                if r < 0:
+                    last_loss = i
+                if reent == 1:
+                    block_dir = pos
                 pos = 0
-        # ---- 3) bar close: carry, mark-to-market, trailing, breakeven
-        if pos == 1:
-            acc += carry_l[i] * q
-            m = eq * (1 + lev * (real + q * _rr(1, ep, c[i], cost_frac, cost_abs) - acc))
-            hh = max(hh, h[i])
-            if tr_k > 0 and not np.isnan(atr[i]):
-                if tr_mode == 1:
-                    stop = max(stop, hh - tr_k * atr[i])
+        # ---- bar close: carry, mark-to-market, SL line, trailing, breakeven
+        if pos != 0:
+            if pos == 1:
+                acc += carry_l[i] * q
+                hh = max(hh, h[i])
+                fav = hh - cref
+                if not np.isnan(stL[i]) and stL[i] < c[i]:
+                    stop = _tmax(stop, stL[i], 1)
+            else:
+                acc += carry_s[i] * q
+                ll = min(ll, l[i])
+                fav = cref - ll
+                if not np.isnan(stS[i]) and stS[i] > c[i]:
+                    stop = _tmax(stop, stS[i], -1)
+            m = eq * (1 + lev * (real + q * _rr(pos, ep, c[i], cost_frac, cost_abs) - acc))
+            if tr_code > 0 and (tr_act <= 0 or fav >= tr_act * R):
+                lv = np.nan
+                if tr_code == 1:
+                    if not np.isnan(atr[i]):
+                        lv = (h[i] - tr_k * atr[i]) if pos == 1 else (l[i] + tr_k * atr[i])
+                elif tr_code == 2:
+                    if not np.isnan(atr[i]):
+                        lv = (hh - tr_k * atr[i]) if pos == 1 else (ll + tr_k * atr[i])
+                elif tr_code == 3:
+                    lv = hh * tr_k if pos == 1 else ll * (2.0 - tr_k)
+                elif tr_code == 4:
+                    x = trL[i] if pos == 1 else trS[i]
+                    if not np.isnan(x) and ((pos == 1 and x < c[i]) or (pos == -1 and x > c[i])):
+                        lv = x
                 else:
-                    stop = max(stop, h[i] - tr_k * atr[i])
-            if be_k > 0 and not be_done and h[i] >= bel:
-                stop = max(stop, ep); be_done = True
-        elif pos == -1:
-            acc += carry_s[i] * q
-            m = eq * (1 + lev * (real + q * _rr(-1, ep, c[i], cost_frac, cost_abs) - acc))
-            ll = min(ll, l[i])
-            if tr_k > 0 and not np.isnan(atr[i]):
-                if tr_mode == 1:
-                    stop = min(stop, ll + tr_k * atr[i])
-                else:
-                    stop = min(stop, l[i] + tr_k * atr[i])
-            if be_k > 0 and not be_done and l[i] <= bel:
-                stop = min(stop, ep); be_done = True
+                    st_ = tr_k * R
+                    k_ = math.floor(fav / st_) if st_ > 0 else 0.0
+                    if k_ >= 1:
+                        lv = stop0 + pos * k_ * st_
+                stop = _tmax(stop, lv, pos)
+            if be_r > 0 and not be_done and ((pos == 1 and h[i] >= bel) or (pos == -1 and l[i] <= bel)):
+                stop = _tmax(stop, ep + pos * be_off * R, pos); be_done = True
         else:
             m = eq
         if m > peak:
@@ -502,10 +576,11 @@ def simulate(o, h, l, c, atr, unit, le, lx, se, sx, start, end, allow_long, allo
         r = (real + q * _rr(pos, ep, px, cost_frac, cost_abs) - acc) * lev
         eq *= (1 + r)
         tr_ent[nt] = ei; tr_ex[nt] = i; tr_dir[nt] = pos; tr_ep[nt] = ep; tr_xp[nt] = px; tr_ret[nt] = r; tr_reason[nt] = 3
-        tr_sl[nt] = stop; tr_tp[nt] = tp; tr_carry[nt] = acc; tr_p1b[nt] = p1b; tr_p1p[nt] = p1p
+        tr_sl[nt] = stop; tr_tp[nt] = tp; tr_carry[nt] = acc; tr_p1b[nt] = p1b; tr_p1p[nt] = p1p; tr_p2b[nt] = p2b; tr_p2p[nt] = p2p
+        tr_sl0[nt] = stop0
         nt += 1
     return (eq, maxdd, nt, tr_ent[:nt], tr_ex[:nt], tr_dir[:nt], tr_ep[:nt], tr_xp[:nt], tr_ret[:nt], tr_reason[:nt], eq_arr,
-            tr_amb[:nt], tr_sl[:nt], tr_tp[:nt], tr_carry[:nt], tr_p1b[:nt], tr_p1p[:nt])
+            tr_amb[:nt], tr_sl[:nt], tr_tp[:nt], tr_carry[:nt], tr_p1b[:nt], tr_p1p[:nt], tr_p2b[:nt], tr_p2p[:nt], tr_sl0[:nt])
 
 
 def metrics(rets, eq, maxdd):
@@ -538,15 +613,21 @@ def sharpe(dr):
 
 def run(fam, p, cc, start, end, direction, cost_frac, cost_abs, want_equity=False, sig=None, lev=1.0, daily=False):
     le, lx, se, sx, _ = sig if sig is not None else signals(fam, p, cc)
-    unit, sl, tp, trk, trm, tp1, tp1f, be, mb = exit_args(p, cc)
-    res = simulate(cc.o, cc.h, cc.l, cc.c, cc.atr, unit, le, lx, se, sx, int(start), int(end),
+    q = full_params(p)
+    lv = X.levels(q, cc, lev)
+    trc, trk = X.trail_args(q)
+    tp2 = float(q["tp2_r"]) if q["tp1_r"] > 0 else 0.0
+    res = simulate(cc.o, cc.h, cc.l, cc.c, cc.atr, le, lx, se, sx, int(start), int(end),
                    direction in ("long", "both"), direction in ("short", "both"),
-                   sl, tp, trk, trm, tp1, tp1f, be, mb, float(cost_frac), float(cost_abs),
-                   want_equity or daily, float(lev), cc.carry_long, cc.carry_short, cc.resolve)
-    eq, maxdd, nt, ent, ex, dr, ep, xp, ret, reason, eqa, amb, sl_, tp_, carry, p1b, p1p = res
+                   lv["RL"], lv["RS"], lv["tpL"], lv["tpS"], lv["stL"], lv["stS"], lv["trL"], lv["trS"], lv["fx"], lv["nb"], cc.day,
+                   int(q["sl_mode"]) == 14, float(q["tp1_r"]), float(q["tp1_f"]), tp2, float(q["tp2_f"]), float(q["be_r"]), float(q["be_off"]),
+                   int(trc), float(trk), float(q["trail_act"]), int(q["max_bars"]), int(q["ts_bars"]),
+                   int(q["cool"]), int(q["max_day"]), float(q["dloss"]) / 100.0, float(q["dprof"]) / 100.0, int(q["reent"]),
+                   float(cost_frac), float(cost_abs), want_equity or daily, float(lev), cc.carry_long, cc.carry_short, cc.resolve)
+    (eq, maxdd, nt, ent, ex, dr, ep, xp, ret, reason, eqa, amb, sl_, tp_, carry, p1b, p1p, p2b, p2p, sl0) = res
     m = metrics(ret, eq, maxdd)
     tr = dict(ent=ent, ex=ex, dir=dr, ep=ep, xp=xp, ret=ret, reason=reason, equity=eqa, amb=amb, sl=sl_, tp=tp_, carry=carry,
-              p1b=p1b, p1p=p1p)
+              p1b=p1b, p1p=p1p, p2b=p2b, p2p=p2p, sl0=sl0)
     if daily:
         d = daily_returns(cc, start, end, eqa)
         tr["daily"] = d

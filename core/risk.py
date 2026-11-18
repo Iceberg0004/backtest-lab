@@ -18,8 +18,8 @@ def trade_sizes(mode, fam, p, cc, tr, value, max_exp, kelly_ret=None, kelly_frac
     if mode == "fixed":
         f = np.full(len(j), float(value))
     elif mode == "risk":
-        unit, sl_k = E.exit_args(p, cc)[:2]
-        dist = sl_k * unit[j] / ep                      # initial stop distance as a share of the entry price
+        RL, RS = E.stop_dist(p, cc)
+        dist = np.where(tr["dir"] == 1, RL[j], RS[j]) / ep   # initial stop distance as a share of the entry price
         f = (value / 100.0) / np.maximum(dist, 1e-9)
     elif mode == "vol":
         bar_vol = cc.atr[j] / ep                        # ~ typical move per bar
