@@ -93,6 +93,12 @@ try:
     _cmp = at.session_state[f"v7cmp_{key}"]
     print("exit compare", len(_cmp) - 1, "combos; profitable IS+unseen",
           sum(1 for r in _cmp[1:] if r["ok"] and r["is_m"]["net"] > 0 and r["oos_m"]["net"] > 0))
+    for cb in at.checkbox:
+        if cb.label.startswith("Tampilkan kode Pine untuk exit ini"):
+            cb.check(); at.run(); break
+    assert not at.exception, [e.message for e in at.exception]
+    _codes = [c.value for c in at.code if "strategy(" in c.value or "indicator(" in c.value]
+    print("exit compare pine blocks", len(_codes))
 except Exception as e:
     print("exit compare missing", e)
 t = at.session_state["tests"][key]

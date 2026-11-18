@@ -762,7 +762,8 @@ with t_res:
                     "Harga masuk": ftr["ep"], "Harga keluar": ftr["xp"],
                     "P&L %": ftr["ret"] * 100,
                     "SL awal": ftr["sl0"], "SL akhir": ftr["sl"], "TP": ftr["tp"],
-                    "TP1 kena": np.where(ftr["p1b"] >= 0, ftr["p1p"], np.nan), "TP2 kena": np.where(ftr["p2b"] >= 0, ftr["p2p"], np.nan),
+                    "TP1 kena": [f"{v:.6g}" if b >= 0 else "-" for b, v in zip(ftr["p1b"], ftr["p1p"])],
+                    "TP2 kena": [f"{v:.6g}" if b >= 0 else "-" for b, v in zip(ftr["p2b"], ftr["p2p"])],
                     "Alasan keluar": np.array([E.X.REASONS[i] for i in range(7)])[ftr["reason"]],
                     "Periode": np.where(ftr["ent"] >= split, "Unseen", "In-sample")})
                 a1, a2, a3, a4 = st.columns(4)

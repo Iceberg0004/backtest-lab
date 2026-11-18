@@ -2,7 +2,10 @@
 from __future__ import annotations
 import pandas as pd
 import streamlit as st
+import json
 from core import engine as E, exits as X, exitcmp as C
+from core.data import TF_MINUTES
+from core.pine import to_pine, NoPine
 
 SL_ALL = [k for k in X.SL_TYPES if k != 14]
 
@@ -50,7 +53,7 @@ def render_exit_compare(ctx):
                          cfg["cost_abs"], cfg["lev"], n_combos=n_c, min_trades=max(5, int(cfg.get("min_trades", 20)) // 2),
                          progress=lambda f: bar.progress(min(f, 1.0), text=f"Menguji kombinasi exit... {f * 100:.0f}%"))
         bar.empty()
-        st.session_state[key] = [dict(label=r["label"], is_m=r["is_m"], oos_m=r["oos_m"], ok=r["ok"]) for r in rows]
+        st.session_state[key] = [dict(label=r["label"], is_m=r["is_m"], oos_m=r["oos_m"], ok=r["ok"], params=r["params"]) for r in rows]
     rows = st.session_state.get(key)
     if not rows:
         return
@@ -66,3 +69,28 @@ def render_exit_compare(ctx):
     st.dataframe(tbl, hide_index=True, width='stretch', height=380,
                  column_config={k: st.column_config.NumberColumn(format="%.2f") for k in
                                 ["IS Net %", "IS PF", "Unseen Net %", "Unseen PF", "Unseen DD %"]})
+
+    # v7.2: take one exit combination further (description, Pine code, JSON)
+    st.markdown("**Pakai salah satu exit**")
+    opts = list(range(min(len(rows), 40)))
+    j = st.selectbox("Pilih baris", opts, key=f"v7sel_{ctx['skey']}",
+                     format_func=lambda i: f"{i + 1}. {rows[i]['label'][:80]} · unseen {rows[i]['oos_m']['net'] * 100:+.1f}%")
+    q = rows[j].get("params")
+    if not q:
+        return
+    st.write(E.describe(o["fam"], q, cfg["direction"]))
+    no_sl_warning(q)
+    res = ctx["res"]
+    st.download_button("⬇️ Simpan setelan ini (JSON)", json.dumps(dict(fam=o["fam"], params=q), default=float, indent=1),
+                       file_name=f"exit_{o['fam']}_{j + 1}.json", key=f"v7dl_{ctx['skey']}")
+    if st.checkbox("Tampilkan kode Pine untuk exit ini", key=f"v7pine_{ctx['skey']}"):
+        try:
+            strat, indi = to_pine(o["fam"], q, cfg["direction"], f"{E.FAMILIES[o['fam']]['name']} · exit {j + 1}", res["symbol"], res["tf"],
+                                  cfg["pine_cost"], cfg["lev"], "Exit dipilih dari 'Bandingkan exit' (hasil uji, bukan saran).", None,
+                                  pip=X.pip_size(float(ctx["cc"].c[-1])), tf_min=TF_MINUTES.get(res["tf"], 60))
+            with st.expander("Kode Pine strategy"):
+                st.code(strat, language="javascript")
+            with st.expander("Kode Pine indicator (sama persis dengan aplikasi)"):
+                st.code(indi, language="javascript")
+        except NoPine as e:
+            st.warning(str(e))
