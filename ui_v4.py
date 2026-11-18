@@ -381,7 +381,7 @@ def render_ml(res, dfc, cc):
     im, om = r["is_m"], r["oos_m"]
     min_oos_tr = max(3, cfg["min_trades"] * cfg["oos_pct"] / max(1, 100 - cfg["oos_pct"]) * 0.3)
     oos_pass = bool(om["net"] > 0 and om["pf"] >= cfg["oos_min_pf"] and om["maxdd"] <= cfg["max_dd"] and om["trades"] >= min_oos_tr)
-    gi = dict(oos_pass=oos_pass, dsr=_dsr_pick(r["dsr"]), cost2x=r["cost2x"]["net"] > 0)
+    gi = dict(oos_pass=oos_pass, dsr=_dsr_pick(r["dsr"]), cost2x=r["cost2x"]["net"] > 0, cap_d=om["net"] < 0 or im["net"] < 0)
     score, letter, parts = R.grade(gi)
     colors = {"A": "#00c853", "B": "#64dd17", "C": "#ffd600", "D": "#ff9100", "E": "#ff1744"}
     st.markdown(f"<div style='padding:8px 12px;border-radius:8px;background:#1e1e1e;border-left:6px solid {colors.get(letter, '#888')}'>"

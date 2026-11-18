@@ -33,6 +33,9 @@ if "deriv" in flags:
     at.checkbox(key="use_deriv").check().run()
 if "strict" in flags:
     at.checkbox(key="strict_dsr").check().run()
+if "pick" in flags:   # v7: search only with the new SL / TP types
+    at.multiselect(key="v7_sl").set_value([3, 4, 5, 9, 10, 11, 13]).run()
+    at.multiselect(key="v7_tp").set_value([1, 5, 7, 8]).run()
 assert not at.exception, at.exception
 print("setup ok", sorted(flags), round(time.time() - t0, 1), "s")
 
@@ -66,13 +69,17 @@ at.run()
 assert not at.exception, [e.message for e in at.exception]
 o = res["out"][idx]
 print("selected", idx, o["fam"], o["params"], "passed", o["passed"])
+if "pick" in flags:
+    _bad = [(r["fam"], r["params"]["sl_mode"], r["params"].get("tp_mode")) for r in res["out"]
+            if r["params"]["sl_mode"] not in (3, 4, 5, 9, 10, 11, 13) or r["params"].get("tp_mode") not in (1, 5, 7, 8)]
+    print("pick check: results outside chosen types", len(_bad), _bad[:3])
 for cb in at.checkbox:
     if cb.label.startswith("Ikutkan yang lolos unseen"):
         cb.check()
 at.run()
 for lab in ["▶️ Jalankan tes harga acak", "▶️ Jalankan tes geser parameter", "▶️ Jalankan tes pencarian acak",
             "▶️ Cek dengan candle 1 menit", "▶️ Jalankan walk-forward", "▶️ Jalankan tes multi-aset", "▶️ Buat portofolio", "🔗 Hitung kemiripan",
-            "➕ Tambah ke perbandingan", "▶️ Uji ulang semua di data terbaru"]:
+            "➕ Tambah ke perbandingan", "▶️ Uji ulang semua di data terbaru", "▶️ Bandingkan exit"]:
     t1 = time.time()
     try:
         click(lab)
@@ -82,6 +89,12 @@ for lab in ["▶️ Jalankan tes harga acak", "▶️ Jalankan tes geser paramet
         for m in list(at.error) + list(at.warning):
             print("  page says:", m.value[:300])
 key = f"{res['id']}_{idx}"
+try:
+    _cmp = at.session_state[f"v7cmp_{key}"]
+    print("exit compare", len(_cmp) - 1, "combos; profitable IS+unseen",
+          sum(1 for r in _cmp[1:] if r["ok"] and r["is_m"]["net"] > 0 and r["oos_m"]["net"] > 0))
+except Exception as e:
+    print("exit compare missing", e)
 t = at.session_state["tests"][key]
 print("grade", t.get("grade"), "dsr", round(t["dsr"]["dsr"], 4), "N", t["dsr"]["N"], "oos_psr", t.get("oos_psr"))
 if "perm" in t: print("perm p", t["perm"]["p"], "real", round(t["perm"]["real"], 4), "median fake", round(float(sorted(t["perm"]["perm"])[len(t["perm"]["perm"]) // 2]), 4))

@@ -64,7 +64,8 @@ def grade_inputs(o, res, t):
                 wfe=(wfo["wfe"] if wfo and not math.isnan(wfo["wfe"]) else (0.0 if wfo else None)),
                 jitter=t["jitter"]["share_profit"] if "jitter" in t else None,
                 basket=(np.mean([r["passed"] for r in b]) if b else None),
-                cost2x=(t["stress"][1]["net"] > 0) if "stress" in t else None)
+                cost2x=(t["stress"][1]["net"] > 0) if "stress" in t else None,
+                cap_d=bool(o.get("overfit")) or o["oos_m"]["net"] < 0 or o["is_m"]["net"] < 0)
 
 
 def render_report(ctx):
@@ -93,13 +94,15 @@ def render_report(ctx):
     t["grade"] = (score, letter)
     pbo = res.get("search_tests", {}).get("pbo")
     colors = {"A": "#00c853", "B": "#64dd17", "C": "#ffd600", "D": "#ff9100", "E": "#ff1744"}
-    done = len(parts)
+    done = len([k for k in parts if k != "cap_d"])
     st.markdown(
         f"<div style='padding:10px 14px;border-radius:8px;background:#1e1e1e;border-left:6px solid {colors.get(letter, '#888')}'>"
         f"<span style='font-size:1.6em;font-weight:700;color:{colors.get(letter, '#888')}'>Rapor ketahanan: {letter}</span> "
         f"<span style='font-size:1.2em'>· {score:.0f}/100</span><br><span style='color:#aaa'>Dihitung dari {done} dari 8 tes. "
         f"Tes lain bisa dijalankan di tab 'Uji ketahanan', 'Multi-aset' dan halaman 'Walk-forward'. "
         f"Ini hasil uji data lama, bukan jaminan dan bukan saran.</span></div>", unsafe_allow_html=True)
+    if "cap_d" in parts:
+        st.warning("Nilai dibatasi maksimal D: strategi ini rugi di data unseen / in-sample, atau ada tanda overfitting.")
     c1, c2, c3, c4 = st.columns(4)
     d = t["dsr"]
     ann = math.sqrt(ctx["cc"].days_per_year)

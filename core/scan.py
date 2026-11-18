@@ -67,7 +67,8 @@ def scan_markets(jobs, load_fn, cfg_base, cost_fn, total_budget, progress=None, 
                 _, itr = E.run(o["fam"], o["params"], cc, meta["is_start"], meta["split"], cfg["direction"], cf, ca,
                                lev=cfg.get("lev", 1.0), daily=True)
                 o["dsr"] = R.deflated_sharpe(itr["daily"], meta["trial_sr"], n_eff)["dsr"]
-            sc, letter, _ = R.grade(dict(oos_pass=bool(o["passed"]), dsr=o["dsr"], pbo=pbo["pbo"] if pbo else None))
+            sc, letter, _ = R.grade(dict(oos_pass=bool(o["passed"]), dsr=o["dsr"], pbo=pbo["pbo"] if pbo else None,
+                                        cap_d=bool(o.get("overfit")) or o["oos_m"]["net"] < 0))
             fam_grades[o["fam"]] = dict(score=sc, letter=letter, oos_pf=o["oos_m"]["pf"], oos_net=o["oos_m"]["net"], passed=bool(o["passed"]))
         key = f"{src}|{sym}|{tf}"
         results[key] = dict(out=out, meta=meta, cfg=cfg, symbol=sym, tf=tf, source=src, id=f"scan_{key}_{time.time():.0f}",

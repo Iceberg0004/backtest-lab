@@ -408,6 +408,8 @@ def grade(tests: dict):
     parts = {}
     for k, w in W.items():
         v = tests.get(k)
+        if k == "cap_d":
+            continue
         if v is None or (isinstance(v, float) and math.isnan(v)):
             continue
         if k == "oos_pass" or k == "cost2x":
@@ -427,5 +429,8 @@ def grade(tests: dict):
         return None, "-", parts
     tot_w = sum(w for _, w in parts.values())
     score = 100 * sum(s * w for s, w in parts.values()) / tot_w
+    if tests.get("cap_d"):          # loses on unseen data / overfit sign: never better than D, whatever the other tests say
+        score = min(score, 49.0)
+        parts["cap_d"] = (0.0, 0)
     letter = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D" if score >= 35 else "E"
     return score, letter, parts

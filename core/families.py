@@ -1109,7 +1109,8 @@ class _:
 
 
 BH_FIXED = {"sl_mode": 1, "sl_pct": 99.0, "tp_pct": 0.0, "tp_atr": 0.0, "trail_atr": 0.0, "tp1_r": 0.0, "be_r": 0.0, "max_bars": 0,
-            "exit_sig": 0, "regime": 0, "sess": 0, "dow": 0, "htf_m": 0, "vol": 0, "rsi_f": 0, "volf": 0, "fund_f": 0, "flow_f": 0, "oi_f": 0}
+            "exit_sig": 0, "tp_mode": 0, "tp2_r": 0.0, "ts_bars": 0, "eod": 0, "wkend": 0, "cool": 0, "max_day": 0, "dloss": 0.0,
+            "dprof": 0.0, "reent": 0, "regime": 0, "sess": 0, "dow": 0, "htf_m": 0, "vol": 0, "rsi_f": 0, "volf": 0, "fund_f": 0, "flow_f": 0, "oi_f": 0}
 
 
 @fam("bh", "Patokan: beli & tahan", {"trend": [0]}, fixed=BH_FIXED)

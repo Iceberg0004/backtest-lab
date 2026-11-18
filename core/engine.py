@@ -654,12 +654,16 @@ def wf_consistency(tr, start, end, k):
     return float(np.mean([x > 0 for x in out])), out
 
 
+def _exit_kt(p):
+    sm, tm = int(p.get("sl_mode", 0)), int(p.get("tp_mode", 0))
+    sk = {0: "sl_atr", 1: "sl_pct", 2: "sl_pip", 3: "sl_buf", 4: "sl_buf", 8: "sl_buf", 13: "sl_money"}.get(sm)
+    tk = {0: ("tp_pct" if sm == 1 else "tp_atr"), 1: "tp_rr", 2: "tp_atr", 3: "tp_pct", 4: "tp_pip"}.get(tm)
+    return sk, tk
+
+
 def exit_keys(p):
     """The main numeric stop / target knobs for the chosen SL / TP types (used by neighbours + sensitivity map)."""
-    sm, tm = int(p.get("sl_mode", 0)), int(p.get("tp_mode", 0))
-    sk = {0: "sl_atr", 1: "sl_pct", 2: "sl_pip", 3: "sl_buf", 4: "sl_buf"}.get(sm, "sl_atr" if sm not in (12, 13, 14) else None)
-    tk = {0: ("tp_pct" if sm == 1 else "tp_atr"), 1: "tp_rr", 2: "tp_atr", 3: "tp_pct", 4: "tp_pip"}.get(tm)
-    return [k for k in (sk, tk) if k]
+    return [k for k in _exit_kt(p) if k]
 
 
 def has_target(p):
@@ -685,24 +689,16 @@ def neighbours(fam, p):
                     nv = p[k] + (1 if f > 1 else -1)
                 q[k] = max(2, nv)
                 out.append(q)
-    ek = exit_keys(p)
-    sk, tk = ek[0], (ek[1] if len(ek) > 1 else None)
-    step = {"sl_pct": 0.25, "sl_pip": 5.0, "sl_buf": 0.25, "tp_pct": 0.25, "tp_pip": 10.0, "tp_rr": 0.5}
-    if sk is None or p.get(sk, 0) <= 0:
-        return out
-    s1 = step.get(sk, 0.5)
-    for d in (-1, 1):
-        q = dict(p); q[sk] = max(s1, p[sk] + d * s1 * max(1, p[sk] // 2)); out.append(q)
+    sk, tk = _exit_kt(p)
+    step = {"sl_pct": 0.25, "sl_pip": 5.0, "sl_buf": 0.25, "sl_money": 50.0, "tp_pct": 0.25, "tp_pip": 10.0, "tp_rr": 0.5}
+    if sk and p.get(sk, 0) > 0:
+        s1 = step.get(sk, 0.5)
+        for d in (-1, 1):
+            q = dict(p); q[sk] = max(s1, p[sk] + d * s1 * max(1, p[sk] // 2)); out.append(q)
     if tk and p.get(tk, 0) > 0:
         s2 = step.get(tk, 0.5)
         for d in (-1, 1):
             q = dict(p); q[tk] = max(s2, p[tk] + d * s2 * max(1, p[tk] // 2)); out.append(q)
-    return out
-    for d in (-1, 1):
-        q = dict(p); q[sk] = max(step, p[sk] + d * step * max(1, p[sk] // 2)); out.append(q)
-    if p[tk] > 0:
-        for d in (-1, 1):
-            q = dict(p); q[tk] = max(step, p[tk] + d * step * max(1, p[tk] // 2)); out.append(q)
     return out
 
 
