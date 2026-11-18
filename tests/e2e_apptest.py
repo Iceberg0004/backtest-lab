@@ -173,3 +173,29 @@ if "scan" in flags:
         print("opened", at.session_state["res"]["symbol"], at.session_state["res"]["tf"], "exceptions", at.exception)
 print("exceptions", at.exception)
 print("total", round(time.time() - t0, 1), "s")
+
+if os.environ.get("MEMDUMP"):
+    import gc, collections
+    import numpy as _np, pandas as _pd
+    gc.collect()
+    arrs = [o for o in gc.get_objects() if isinstance(o, _np.ndarray)]
+    print("MEMDUMP live ndarrays", len(arrs), "MB", round(sum(a.nbytes for a in arrs if a.base is None) / 1e6, 1))
+    from core import engine as _E
+    caches = [o for o in gc.get_objects() if isinstance(o, _E.Cache)]
+    print("MEMDUMP Cache objects", len(caches), [len(c.c) for c in caches])
+    def _sz(v, seen=None, depth=0):
+        seen = seen if seen is not None else set()
+        if id(v) in seen or depth > 6: return 0
+        seen.add(id(v))
+        if isinstance(v, _np.ndarray): return v.nbytes if v.base is None else 0
+        if isinstance(v, _pd.DataFrame): return int(v.memory_usage(deep=False).sum())
+        if isinstance(v, _pd.Series): return int(v.memory_usage(deep=False))
+        if isinstance(v, dict): return sum(_sz(x, seen, depth + 1) for x in v.values())
+        if isinstance(v, (list, tuple)): return sum(_sz(x, seen, depth + 1) for x in v)
+        if hasattr(v, "__dict__") and not isinstance(v, type): return _sz(vars(v), seen, depth + 1)
+        return 0
+    rows = []
+    for k in list(at.session_state.keys()):
+        try: rows.append((round(_sz(at.session_state[k]) / 1e6, 1), k))
+        except Exception: pass
+    print("MEMDUMP session top", sorted(rows, reverse=True)[:12])

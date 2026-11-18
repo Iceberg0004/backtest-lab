@@ -1,7 +1,8 @@
 """Strategy families, bar-by-bar simulator (numba), metrics, search loop,
 walk-forward consistency, parameter stability and Monte Carlo."""
 from __future__ import annotations
-import math, os, time
+import math, os, time, weakref
+from collections import OrderedDict
 import numpy as np
 import pandas as pd
 from numba import njit
@@ -183,24 +184,48 @@ class Cache:
             if col in self.x:
                 self.avail.add(col)
 
-    # indicator arrays are cached, but capped in bytes (LRU) so long histories fit in ~1 GB of RAM
-    MAX_BYTES = int(float(os.environ.get("VELA_INDICATOR_CACHE_MB", "32")) * 1e6)
+    # indicator arrays are cached, but capped in bytes (LRU) so long histories fit in ~1 GB of RAM.
+    # v7: ONE budget for all caches in the process (detail page, walk-forward, multi-asset, ML... each used to get its own 32 MB).
+    MAX_BYTES = int(float(os.environ.get("VELA_INDICATOR_CACHE_MB", "40")) * 1e6)
+
+    @staticmethod
+    def _nb(v):
+        return sum(getattr(x, "nbytes", 0) for x in v) if isinstance(v, tuple) else getattr(v, "nbytes", 0)
 
     def get(self, key, fn):
         d = self.d
+        cid = self.__dict__.get("_cid")
+        if cid is None:
+            _CACHE_SEQ[0] += 1
+            cid = self._cid = _CACHE_SEQ[0]
         if key in d:
             v = d.pop(key)
             d[key] = v          # mark as recently used
+            g = _CACHE_LRU.pop((cid, key), None)
+            if g is not None:
+                _CACHE_LRU[(cid, key)] = g
             return v
         v = fn()
-        nb = sum(getattr(x, "nbytes", 0) for x in v) if isinstance(v, tuple) else getattr(v, "nbytes", 0)
-        self._bytes = getattr(self, "_bytes", 0) + nb
+        nb = self._nb(v)
         d[key] = v
-        while self._bytes > self.MAX_BYTES and len(d) > 1:
-            k0 = next(iter(d))
-            v0 = d.pop(k0)
-            self._bytes -= sum(getattr(x, "nbytes", 0) for x in v0) if isinstance(v0, tuple) else getattr(v0, "nbytes", 0)
+        old = _CACHE_LRU.pop((cid, key), None)
+        if old is not None:
+            _CACHE_BYTES[0] -= old[1]
+        _CACHE_LRU[(cid, key)] = (weakref.ref(self), nb)
+        _CACHE_BYTES[0] += nb
+        while _CACHE_BYTES[0] > self.MAX_BYTES and len(_CACHE_LRU) > 1:
+            (c0, k0), (wr, nb0) = next(iter(_CACHE_LRU.items()))
+            del _CACHE_LRU[(c0, k0)]
+            _CACHE_BYTES[0] -= nb0
+            owner = wr()
+            if owner is not None:
+                owner.d.pop(k0, None)
         return v
+
+
+_CACHE_LRU = OrderedDict()     # (cache id, key) -> (weakref to cache, bytes); oldest first
+_CACHE_BYTES = [0]
+_CACHE_SEQ = [0]
 
 
 def _trend(cc, n):

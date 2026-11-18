@@ -503,7 +503,8 @@ def report_html(ctx, ftr, im, om, fm, grade, pine, name):
 
 # ================================================================== 2D parameter sensitivity
 def _grid_vals(k, v, n=9):
-    if k in ("sl_atr", "tp_atr", "sl_pct", "tp_pct", "trail_atr", "tp_rr", "sl_pip", "tp_pip", "sl_buf"):
+    if k in ("sl_atr", "tp_atr", "sl_pct", "tp_pct", "trail_atr", "tp_rr", "sl_pip", "tp_pip", "sl_buf", "tp1_r", "be_r", "trail_act") \
+            or isinstance(v, float):
         return sorted({round(float(x), 2) for x in np.linspace(max(0.25, v * 0.5), v * 1.5, n)})
     return sorted({int(round(x)) for x in np.linspace(max(2, v * 0.5), max(v * 1.5, v + 4), n)})
 
@@ -512,7 +513,10 @@ def render_sensitivity(ctx):
     o, cc, cfg = ctx["o"], ctx["cc"], ctx["cfg"]
     p = E.full_params(o["params"])
     keys = [k for k, v in E.FAMILIES[o["fam"]]["space"].items() if isinstance(v, tuple) and isinstance(p.get(k), (int, float))]
-    keys += [k for k in E.exit_keys(p) if p.get(k, 0) > 0]
+    keys += [k for k, v in E.FAMILIES[o["fam"]]["space"].items()
+             if isinstance(v, list) and len(set(v)) > 1 and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v)
+             and isinstance(p.get(k), (int, float)) and p.get(k) and k not in keys]
+    keys += [k for k in E.exit_keys(p) + ["trail_atr", "tp1_r", "be_r", "trail_act"] if p.get(k, 0) > 0 and k not in keys]
     st.markdown("#### 🗺️ Peta sensitivitas parameter")
     if len(keys) < 2:
         st.caption("Strategi ini punya kurang dari 2 parameter angka untuk dipetakan.")
