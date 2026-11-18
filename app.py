@@ -33,6 +33,7 @@ from core import robust as R, realism as X
 import ui_extra as U
 import ui_v4 as V
 import ui_v6 as V6
+import ui_v7 as V7
 for _m in list(_sys.modules.values()):   # remember the file version each local module was loaded from (see above)
     _f = getattr(_m, "__file__", None)
     if _f and os.path.abspath(_f).startswith(_HERE + os.sep) and not hasattr(_m, "_bt_mtime") and os.path.exists(_f):
@@ -340,7 +341,7 @@ def candle_fig(df, fam=None, p=None, tr=None, cc=None, start_i=None, height=620,
                                              marker=dict(symbol=sym, size=12, color=col)), row=1, col=1)
             m = (ex >= 0)
             if m.any():
-                reason = np.array(["Exit", "SL", "TP", "Akhir", "Waktu"])[tr["reason"][m]]
+                reason = np.array(["Exit", "SL", "TP", "Akhir", "Waktu", "Sesi", "TimeStop"])[tr["reason"][m]]
                 txt = [f"{r} {v*100:+.2f}%" for r, v in zip(reason, tr["ret"][m])]
                 fig.add_trace(go.Scatter(x=to_wib(idx[ex[m]]), y=tr["xp"][m], mode="markers+text", name="Exit",
                                          text=txt, textposition="top center", textfont=dict(size=10),
@@ -486,8 +487,9 @@ with t_search:
     bad_tf = [E.FAMILIES[f]["name"] for f in ss.families if E.FAMILIES[f]["intraday"] and TF_MINUTES.get(tf, 60) > 60]
     if bad_tf:
         st.caption(f"Dilewati di timeframe ini (butuh timeframe ≤ 1 jam): {', '.join(bad_tf)}.")
-    st.caption("Exit ikut dicoba otomatis: stop loss ATR atau %, take profit, ambil untung 50% (TP1), stop ke harga masuk (breakeven), "
-               "trailing ATR / chandelier, keluar setelah N candle, keluar saat sinyal kebalikan. Filter ADX juga ikut dicoba.")
+    st.caption("Exit ikut dicoba otomatis: 14 jenis stop loss, 10 jenis take profit, TP1/TP2 + breakeven, 8 jenis trailing, "
+               "time stop, tutup akhir hari / akhir pekan, jeda setelah rugi, batas harian. Filter ADX juga ikut dicoba.")
+    exit_pick = V7.render_exit_pick()
     m1, m2 = st.columns(2)
     m1.radio("Mode penilaian", ["ketat", "vela"], key="mode", horizontal=True,
              format_func=lambda k: {"ketat": "Ketat (disarankan)", "vela": "Mode Vela (longgar)"}[k],
@@ -523,7 +525,8 @@ with t_search:
                            min_pf=ss.min_pf, min_wr=ss.min_wr / 100, max_dd=ss.max_dd / 100, min_trades=ss.min_trades,
                            min_wf=ss.min_wf / 100, min_stab=ss.min_stab / 100, oos_min_pf=ss.oos_min_pf,
                            lev=ss.lev, seed=int(time.time()) % 100000, pine_cost=pine_cost, carry=carry_cfg(),
-                           mode=ss.mode, algo=ss.algo, combo=bool(ss.combo), tf_min=TF_MINUTES.get(tf, 60), deriv=deriv_on())
+                           mode=ss.mode, algo=ss.algo, combo=bool(ss.combo), tf_min=TF_MINUTES.get(tf, 60), deriv=deriv_on(),
+                           exit_pick=exit_pick)
                 bar = st.progress(0.0, text="Menyiapkan data...")
                 cc0, carry_info = make_cache(dfc, cfg, symbol, tf)
                 def prog(f, tested, npass):
@@ -664,6 +667,7 @@ with t_res:
             o = res["out"][ss.sel]
             st.markdown(f"### {E.FAMILIES[o['fam']]['name']} #{ss.sel + 1}")
             st.write(E.describe(o["fam"], o["params"], cfg["direction"]))
+            V7.no_sl_warning(o["params"])
             if o["overfit"]:
                 st.error("⚠️ Tanda overfitting: hasil di data unseen jauh lebih buruk dari data in-sample. Jangan dipakai.")
             # recompute on the latest data (new candles since the search are also 'unseen')
@@ -715,6 +719,7 @@ with t_res:
                 V.render_meta(ctx)
             with d_rob:
                 U.render_robust(ctx)
+                V7.render_exit_compare(ctx)
             with d_bask:
                 U.render_basket(ctx)
             with d_real:
@@ -745,7 +750,9 @@ with t_res:
                     "Arah": np.where(ftr["dir"] == 1, "Long", "Short"),
                     "Harga masuk": ftr["ep"], "Harga keluar": ftr["xp"],
                     "P&L %": ftr["ret"] * 100,
-                    "Alasan keluar": np.array(["Sinyal", "Stop loss", "Take profit", "Akhir data", "Waktu habis"])[ftr["reason"]],
+                    "SL awal": ftr["sl0"], "SL akhir": ftr["sl"], "TP": ftr["tp"],
+                    "TP1 kena": np.where(ftr["p1b"] >= 0, ftr["p1p"], np.nan), "TP2 kena": np.where(ftr["p2b"] >= 0, ftr["p2p"], np.nan),
+                    "Alasan keluar": np.array([E.X.REASONS[i] for i in range(7)])[ftr["reason"]],
                     "Periode": np.where(ftr["ent"] >= split, "Unseen", "In-sample")})
                 a1, a2, a3, a4 = st.columns(4)
                 r = ftr["ret"]
@@ -795,7 +802,8 @@ with t_res:
                          ("Rapor", f"{g[1]} ({g[0]:.0f}/100)" if g[0] is not None else "-")]
                 try:
                     strat, indi = to_pine(o["fam"], o["params"], cfg["direction"], f"{E.FAMILIES[o['fam']]['name']} #{ss.sel+1}",
-                                          tv_sym, res["tf"], cfg["pine_cost"], lev, note, trows)
+                                          tv_sym, res["tf"], cfg["pine_cost"], lev, note, trows,
+                                          pip=E.X.pip_size(float(dfc.close.iloc[-1])), tf_min=TF_MINUTES.get(res["tf"], 60))
                 except NoPine as e:
                     strat = indi = None
                     st.warning(str(e) + " Simpan sebagai JSON untuk dipakai di tab 'Sinyal Live'.")

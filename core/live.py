@@ -57,7 +57,7 @@ def state(fam, p, direction, closed: pd.DataFrame, raw: pd.DataFrame | None, cos
                      "Harga masuk": float(tr["ep"][k]),
                      "Keluar": d.index[min(tr["ex"][k], n - 1)] if tr["reason"][k] != 3 else None,
                      "Hasil %": float(tr["ret"][k] * 100) if tr["reason"][k] != 3 else None,
-                     "Status": "masih terbuka" if tr["reason"][k] == 3 else ["Sinyal", "Stop loss", "Take profit", "Akhir data", "Waktu habis"][tr["reason"][k]]})
+                     "Status": "masih terbuka" if tr["reason"][k] == 3 else E.X.REASONS[int(tr["reason"][k])]})
     out["last"] = pd.DataFrame(rows[::-1])
     out["recent_m"] = m
     return out

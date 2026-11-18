@@ -654,6 +654,25 @@ def wf_consistency(tr, start, end, k):
     return float(np.mean([x > 0 for x in out])), out
 
 
+def exit_keys(p):
+    """The main numeric stop / target knobs for the chosen SL / TP types (used by neighbours + sensitivity map)."""
+    sm, tm = int(p.get("sl_mode", 0)), int(p.get("tp_mode", 0))
+    sk = {0: "sl_atr", 1: "sl_pct", 2: "sl_pip", 3: "sl_buf", 4: "sl_buf"}.get(sm, "sl_atr" if sm not in (12, 13, 14) else None)
+    tk = {0: ("tp_pct" if sm == 1 else "tp_atr"), 1: "tp_rr", 2: "tp_atr", 3: "tp_pct", 4: "tp_pip"}.get(tm)
+    return [k for k in (sk, tk) if k]
+
+
+def has_target(p):
+    """True when the exit has a fixed take profit or partial TP (so SL+TP in one candle can happen)."""
+    p = full_params(p)
+    tm = int(p.get("tp_mode", 0))
+    if p.get("tp1_r", 0) > 0:
+        return True
+    if tm == 0:
+        return (p["tp_pct"] if p["sl_mode"] == 1 else p["tp_atr"]) > 0
+    return tm != 9
+
+
 def neighbours(fam, p):
     """Nearby parameter sets (each number nudged ~15%, stop/target nudged) used for the stability check."""
     p = full_params(p)
@@ -666,7 +685,19 @@ def neighbours(fam, p):
                     nv = p[k] + (1 if f > 1 else -1)
                 q[k] = max(2, nv)
                 out.append(q)
-    sk, tk, step = ("sl_pct", "tp_pct", 0.25) if p["sl_mode"] == 1 else ("sl_atr", "tp_atr", 0.5)
+    ek = exit_keys(p)
+    sk, tk = ek[0], (ek[1] if len(ek) > 1 else None)
+    step = {"sl_pct": 0.25, "sl_pip": 5.0, "sl_buf": 0.25, "tp_pct": 0.25, "tp_pip": 10.0, "tp_rr": 0.5}
+    if sk is None or p.get(sk, 0) <= 0:
+        return out
+    s1 = step.get(sk, 0.5)
+    for d in (-1, 1):
+        q = dict(p); q[sk] = max(s1, p[sk] + d * s1 * max(1, p[sk] // 2)); out.append(q)
+    if tk and p.get(tk, 0) > 0:
+        s2 = step.get(tk, 0.5)
+        for d in (-1, 1):
+            q = dict(p); q[tk] = max(s2, p[tk] + d * s2 * max(1, p[tk] // 2)); out.append(q)
+    return out
     for d in (-1, 1):
         q = dict(p); q[sk] = max(step, p[sk] + d * step * max(1, p[sk] // 2)); out.append(q)
     if p[tk] > 0:
@@ -714,6 +745,29 @@ def monte_carlo(rets, runs=1000, method="bootstrap", seed=7, skip=0.1):
 
 
 # ------------------------------------------------------------------ search
+RULE_KEYS = ("ts_bars", "eod", "wkend", "cool", "max_day", "dloss", "dprof", "reent")
+
+
+def restrict_exits(fam, p, pick, rng, tf_min=60, combo=False):
+    """Keep a sampled / mutated variant inside the exit types the user allowed.
+    pick = {"sl": [sl_mode...], "tp": [tp_mode...], "trail": bool, "multi": bool, "rules": bool}."""
+    if not pick:
+        return p
+    q = dict(p)
+    if pick.get("sl") and int(q.get("sl_mode", 0)) not in pick["sl"]:
+        q["sl_mode"] = int(rng.choice(pick["sl"]))
+    if pick.get("tp") and int(q.get("tp_mode", 0)) not in pick["tp"]:
+        q["tp_mode"] = int(rng.choice(pick["tp"]))
+    if not pick.get("trail", True):
+        q["trail_atr"] = 0.0
+    if not pick.get("multi", True):
+        q["tp1_r"] = 0.0; q["tp2_r"] = 0.0; q["be_r"] = 0.0
+    if not pick.get("rules", True):
+        for k in RULE_KEYS:
+            q[k] = DEFAULTS.get(k, 0)
+    return fix_params(fam, q, tf_min, combo)
+
+
 def search(df, cfg, progress=None, cc=None):
     """cfg: families, n_variants, time_budget, direction, oos_pct, folds, cost_frac, cost_abs,
     min_pf, min_wr, max_dd, min_trades, min_wf, min_stab, oos_min_pf, seed,
@@ -729,6 +783,7 @@ def search(df, cfg, progress=None, cc=None):
     combo = bool(cfg.get("combo", False))
     mode = cfg.get("mode", "ketat")
     algo = cfg.get("algo", "random")
+    pick = cfg.get("exit_pick")
     fams = allowed_families(cfg["families"], tf_min, cc.has_volume, getattr(cc, "avail", set()))
     skipped_fams = [f for f in cfg["families"] if f not in fams]
     if not fams:
@@ -748,10 +803,10 @@ def search(df, cfg, progress=None, cc=None):
             break
         if algo == "evo" and tested >= warmup and elite and rng.random() < 0.7:
             _, fam, par = elite[int(rng.integers(0, len(elite)))]
-            p = drop_unavailable(mutate(fam, par, rng, tf_min, combo), cc)
+            p = drop_unavailable(restrict_exits(fam, mutate(fam, par, rng, tf_min, combo), pick, rng, tf_min, combo), cc)
         else:
             fam = fams[k % len(fams)]
-            p = drop_unavailable(sample_params(fam, rng, tf_min, combo), cc)
+            p = drop_unavailable(restrict_exits(fam, sample_params(fam, rng, tf_min, combo), pick, rng, tf_min, combo), cc)
         key = (fam, tuple(sorted(p.items())))
         if key in seen:
             misses += 1

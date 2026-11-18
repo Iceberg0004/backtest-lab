@@ -185,7 +185,8 @@ def jitter(fam, p, cc, start, end, cfg, n=200, pct=0.2, seed=9):
     """Randomly nudge every numeric parameter by up to +/- pct and re-test. A robust strategy stays profitable."""
     rng = np.random.default_rng(seed)
     space = E.FAMILIES[fam]["space"]
-    fl_keys = ("sl_atr", "tp_atr", "sl_pct", "tp_pct", "trail_atr", "tp1_r", "be_r")
+    fl_keys = ("sl_atr", "tp_atr", "sl_pct", "tp_pct", "trail_atr", "tp1_r", "be_r", "sl_pip", "sl_buf", "sl_money", "tp_rr",
+               "tp_pip", "tp2_r", "trail_pct", "trail_step", "trail_act")
     res = []
     for _ in range(n):
         q = E.full_params(p)

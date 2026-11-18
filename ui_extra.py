@@ -290,7 +290,7 @@ def render_realism(ctx):
                "Aplikasi ini default menganggap stop loss duluan (paling aman). Tombol ini membuka candle 1 menit untuk candle-candle itu "
                "dan memakai urutan yang sebenarnya.")
     _pp = E.full_params(o["params"])
-    if (_pp["tp_pct"] if _pp["sl_mode"] == 1 else _pp["tp_atr"]) <= 0 and _pp["tp1_r"] <= 0:
+    if not E.has_target(_pp):
         st.info("Strategi ini tidak memakai take profit tetap, jadi masalah ini tidak terjadi.")
     elif st.button("▶️ Cek dengan candle 1 menit", key=f"bi_{ctx['skey']}"):
         bar = st.progress(0.0, text="Mengambil candle 1 menit...")

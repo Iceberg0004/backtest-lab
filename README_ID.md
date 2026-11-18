@@ -111,6 +111,50 @@ Sudah ada sebelumnya (tidak dibuat ulang): breakout sesi / opening range, Donchi
 
 Hasil tes kami sendiri (biaya realistis, leverage 10x, data unseen): grid, martingale, hedging, dan zone recovery **sering kena margin call** atau rugi di unseen. DCA terlihat paling "rapi" (win rate hampir 100%) tapi drawdown-nya besar dan peluang margin call di Monte Carlo tidak nol. Tidak ada satu pun yang mengalahkan strategi terbaik v5 setelah risiko dihitung. Win rate tinggi ≠ aman.
 
+## Baru di v7: SL / TP lengkap + 68 jenis strategi
+
+**Stop loss (14 jenis + "tanpa SL")**: ATR, % harga, pips/poin, swing low/high + buffer, pivot/struktur + buffer, channel Donchian,
+band Bollinger, band Keltner, low/high candle sinyal + buffer, chandelier, Parabolic SAR, Supertrend, standar deviasi, maks rugi (uang),
+dan "tanpa SL" (ada peringatan). Kalau level SL tidak masuk akal (mis. di sisi yang salah), dipakai SL ATR biasa.
+
+**Take profit (10 jenis)**: sama satuan dengan SL, kelipatan R (1–5R), ATR, %, pips, swing/S&R terdekat, pivot terakhir,
+Fibonacci extension 1.272 / 1.618 / 2.0, band seberang, tanpa TP (hanya trailing / sinyal kebalikan).
+
+**Ambil untung bertahap**: TP1 dan TP2 di X R dengan % yang ditutup, sisanya ke TP akhir. Breakeven di X R + offset.
+
+**Trailing (8 jenis)**: ATR, chandelier, %, Parabolic SAR, Supertrend, garis MA, step (naik per X R), Donchian. Bisa "aktif setelah X R".
+
+**Aturan trade**: keluar setelah N candle, time stop (keluar kalau belum untung setelah N candle), tutup akhir hari (00:00 / 21:00 /
+16:00 UTC), tutup akhir pekan (Jumat 20:00 UTC), jeda N candle setelah rugi, maks trade per hari, batas rugi / target untung harian,
+tidak masuk ulang ke arah yang sama sebelum ada sinyal kebalikan. (Pyramid / tambah posisi ada di tab 📐 Posisi sejak v6.)
+
+Semua jenis ini ikut dicari otomatis (Acak dan Evolusi), ikut tes robust, dan ikut diekspor ke Pine. Di tab cari ada
+"🎯 SL / TP lengkap" untuk membatasi jenis yang dicoba. Daftar trade sekarang menampilkan SL awal, SL akhir, TP, TP1/TP2 yang kena,
+dan alasan keluar. Di tab Robust ada **⚖️ Bandingkan exit**: sinyal masuk sama, 60–200 kombinasi exit, diurutkan dari data unseen
+(baris teratas cenderung terlalu bagus karena dipilih dari unseen; lebih aman pilih yang untung di in-sample dan unseen).
+
+**Pine**: versi indicator sama persis dengan aplikasi di 110/110 kasus tes (PineTS), termasuk semua jenis SL/TP/trailing baru.
+Versi strategy sama di 106/110; 4 kasus yang beda semuanya memakai TP1/TP2 (mesin order TradingView kadang menggabung / melewati satu leg).
+
+**Strategi yang ada (68 jenis), per kategori**
+- Tren / MA: MA cross (SMA/EMA, termasuk golden/death cross), 2 MA + filter, Hull/TEMA/KAMA, ZLEMA/ALMA/T3/McGinley, MA ribbon (triple MA),
+  Supertrend, Parabolic SAR, Ichimoku, Aroon, Vortex, Heikin Ashi, SSL channel, UT Bot, Range filter, Gaussian channel, LRC.
+- Momentum / osilator: RSI, RSI-2 (Connors), Stoch RSI, Williams %R, CCI, MFI, MACD, TRIX, KST, ROC, Awesome Oscillator, Elder Ray
+  (bull / bear power), Fisher transform, QQE, WaveTrend.
+- Breakout / volatilitas: Donchian (+ garis tengah), Bollinger squeeze, Squeeze (LazyBear), Keltner, ATR channel, volatility breakout,
+  NR4/NR7/inside bar, Chandelier entry, breakout level (high/low kemarin, open mingguan, range Asia, high/low minggu lalu), ORB,
+  opening drive, Larry Williams volatility breakout.
+- Mean reversion: RSI, Williams %R, MFI, Z-score, VWAP reversion, linear regression channel, Bollinger %B, gap fill.
+- Candle / pola: engulfing, pin bar (hammer / shooting star), doji, morning/evening star, three soldiers/crows, harami, tweezer, Fibonacci pullback, pivot S&R.
+- SMC: fair value gap, break of structure / order block, liquidity sweep.
+- Musiman: jam & hari tertentu, pergantian bulan. Patokan: beli & tahan.
+- Volume: OBV, breakout + lonjakan volume, divergensi OBV / AD / CMF, POC (sederhana).
+- Divergensi: RSI, MACD.
+- Lainnya: grid, martingale, DCA, pyramid (tab 🧮 / 📐), pairs / spread, ML, data derivatif (funding ekstrem, carry funding, open interest, order flow CVD).
+
+**Belum ada (jujur)**: kekuatan relatif vs BTC sebagai sinyal (butuh 2 aset sekaligus; sebagian bisa lewat tab pairs),
+volume profile lengkap (hanya POC sederhana dari candle), pola harmonik.
+
 ## Jenis strategi, exit, dan filter
 - **43 jenis strategi** (fade funding, divergensi OI, order flow, dan carry khusus data derivatif crypto): MA cross, RSI, Donchian, Bollinger squeeze, MACD, Supertrend, Keltner, Stoch RSI pullback, Z-score, Hull/TEMA/KAMA cross, Ichimoku, Parabolic SAR, Heikin-Ashi, CCI, Williams %R, MFI, OBV, breakout + volume, ATR channel, pivot support/resistance, inside bar / NR7, engulfing, opening range breakout (hanya timeframe ≤ 1 jam), Aroon, Vortex, Squeeze Momentum, linear regression channel, divergence RSI, fade funding ekstrem, divergensi OI, order flow/CVD.
 - **Exit (dicoba otomatis):** stop loss ATR atau %, take profit, ambil untung 50% di TP1, stop pindah ke harga masuk (breakeven) setelah X R, trailing ATR atau chandelier, keluar setelah N candle, keluar hanya saat sinyal kebalikan.
