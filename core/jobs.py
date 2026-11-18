@@ -55,6 +55,16 @@ def status(jid):
     return None
 
 
+def _trim():
+    """Give memory freed by the job back to the OS (the free cloud has ~1 GB RAM)."""
+    try:
+        import gc, ctypes
+        gc.collect()
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
 def request_stop(jid):
     """User pressed Stop: the job finishes early with what it has (partial result). True if the job was running."""
     with _LOCK:
@@ -132,6 +142,7 @@ def start(jid, fn, label="", kind="", heavy=True, extra_meta=None):
         finally:
             with _LOCK:
                 _RUN.pop(jid, None)
+            _trim()
             if sem:
                 sem.release()
             cleanup()

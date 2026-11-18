@@ -1,5 +1,6 @@
 """v7 UI: pilih jenis SL/TP untuk pencarian + alat 'Bandingkan exit'."""
 from __future__ import annotations
+import ui_bg as BG
 import pandas as pd
 import streamlit as st
 import json
@@ -50,13 +51,19 @@ def render_exit_compare(ctx):
                "dan kolom 'Walk-fwd IS %' tinggi (untung di banyak potongan data lama).")
     key = f"v7cmp_{ctx['skey']}"
     n_c = st.select_slider("Jumlah kombinasi exit", [60, 120, 200], value=120, key=f"v7n_{ctx['skey']}")
+    t = st.session_state.setdefault("tests", {}).setdefault(ctx["skey"], {})
     if st.button("▶️ Bandingkan exit", key=f"v7b_{ctx['skey']}"):
-        bar = st.progress(0.0, text="Menguji kombinasi exit...")
-        rows = C.compare(o["fam"], o["params"], cc, ctx["is_start"], ctx["split"], ctx["n"], cfg["direction"], cfg["cost_frac"],
-                         cfg["cost_abs"], cfg["lev"], n_combos=n_c, min_trades=max(5, int(cfg.get("min_trades", 20)) // 2),
-                         progress=lambda f: bar.progress(min(f, 1.0), text=f"Menguji kombinasi exit... {f * 100:.0f}%"))
-        bar.empty()
-        st.session_state[key] = [dict(label=r["label"], is_m=r["is_m"], oos_m=r["oos_m"], ok=r["ok"], params=r["params"], wf=r["wf"]) for r in rows]
+        _a = (o["fam"], o["params"], cc, ctx["is_start"], ctx["split"], ctx["n"], cfg["direction"], cfg["cost_frac"], cfg["cost_abs"], cfg["lev"])
+        _mt = max(5, int(cfg.get("min_trades", 20)) // 2)
+
+        def _cmp(prog, _a=_a, _mt=_mt, n_c=n_c):
+            rows_ = C.compare(*_a, n_combos=n_c, min_trades=_mt,
+                              progress=lambda f: prog(min(f, 1.0), f"Menguji kombinasi exit... {f * 100:.0f}%"))
+            return [dict(label=r["label"], is_m=r["is_m"], oos_m=r["oos_m"], ok=r["ok"], params=r["params"], wf=r["wf"]) for r in rows_]
+        BG.launch(t, ctx["skey"], "v7cmp", "Bandingkan exit", _cmp, dict(n=n_c))
+    BG.poll(t, ctx["skey"], "v7cmp", "Bandingkan exit")
+    if "v7cmp" in t:
+        st.session_state[key] = t["v7cmp"]
     rows = st.session_state.get(key)
     if not rows:
         return

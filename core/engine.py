@@ -243,6 +243,15 @@ _CACHE_LOCK = threading.RLock()
 _MISS = object()
 
 
+def _fresh_lock_after_fork():
+    global _CACHE_LOCK
+    _CACHE_LOCK = threading.RLock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_fresh_lock_after_fork)
+
+
 def _trend(cc, n):
     if not n:
         return None

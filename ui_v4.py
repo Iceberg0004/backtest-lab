@@ -1,6 +1,7 @@
 """v4 pages: analytics, sizing & prop firm, regime, meta-label, ML mode, live signals, HTML report.
 Heavy parts only run after a button press (the free cloud has ~1 GB RAM)."""
 from __future__ import annotations
+import ui_bg as BG
 import math, datetime as dt
 import numpy as np
 import pandas as pd
@@ -362,18 +363,20 @@ def render_ml(res, dfc, cc):
     store = ss.setdefault("ml", {})
     if st.button("🤖 Latih & uji model", type="primary", key="ml_run"):
         store.clear()
-        bar = st.progress(0.0, "Menyiapkan fitur...")
-        try:
+
+        def _train(prog, cc=cc, is_start=is_start, split=split, cfg=cfg, pt=pt, sl=sl, H=H, kind=kind, direction=direction, n=n):
             from core import isolate
-            r = isolate.run(ml.ml_search, cc, is_start, split, cfg, pt=pt, sl=sl, H=int(H), kind=kind, direction=direction,
-                            progress=lambda f, t: bar.progress(min(1.0, f), t))
-            om2, _ = E.run("ma_cross", r["exitp"], cc, split, n, "both", cfg["cost_frac"] * 2, cfg["cost_abs"] * 2, sig=r["signals"], lev=cfg["lev"])
-            r["cost2x"] = om2
-            r.pop("signals", None); r.pop("is_tr", None)
-            store[key] = r
-        finally:
-            bar.empty()
-            _trim()
+            r_ = isolate.run(ml.ml_search, cc, is_start, split, cfg, pt=pt, sl=sl, H=int(H), kind=kind, direction=direction,
+                             progress=lambda f, t_: prog(min(1.0, f), t_))
+            om2, _ = E.run("ma_cross", r_["exitp"], cc, split, n, "both", cfg["cost_frac"] * 2, cfg["cost_abs"] * 2, sig=r_["signals"], lev=cfg["lev"])
+            r_["cost2x"] = om2
+            r_.pop("signals", None); r_.pop("is_tr", None)
+            return r_
+        BG.launch(store, "ml", str(key), "Latih model ML", _train, dict(k=str(key)))
+    BG.poll(store, "ml", str(key), "Latih model ML")
+    if str(key) in store:
+        store[key] = store.pop(str(key))
+        _trim()
     r = store.get(key)
     if not r:
         st.caption("Butuh ±5-30 detik tergantung panjang data. Hasil hanya disimpan selama sesi ini.")
