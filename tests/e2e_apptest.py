@@ -44,11 +44,17 @@ print("setup ok", sorted(flags), round(time.time() - t0, 1), "s")
 def wait_jobs():
     """v8: search / scan run as background jobs; re-run the page until they are done (like the progress poller)."""
     import core.jobs as J
+    ids = []
     for k in ("job_search", "job_scan"):
         try:
-            jid = at.session_state[k]
+            ids.append(at.session_state[k])
         except Exception:
-            continue
+            pass
+    try:
+        ids += list((at.session_state["tool_jobs"] or {}).values())
+    except Exception:
+        pass
+    for jid in ids:
         t1 = time.time()
         while J.status(jid) and J.status(jid)["state"] in ("antri", "jalan") and time.time() - t1 < 1500:
             time.sleep(2)

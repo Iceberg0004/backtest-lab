@@ -1,7 +1,7 @@
 """Strategy families, bar-by-bar simulator (numba), metrics, search loop,
 walk-forward consistency, parameter stability and Monte Carlo."""
 from __future__ import annotations
-import math, os, time, weakref
+import math, os, threading, time, weakref
 from collections import OrderedDict
 import numpy as np
 import pandas as pd
@@ -202,39 +202,45 @@ class Cache:
         return sum(getattr(x, "nbytes", 0) for x in v) if isinstance(v, tuple) else getattr(v, "nbytes", 0)
 
     def get(self, key, fn):
+        # background jobs (search / tools) and the page can use caches at the same time: the shared LRU
+        # bookkeeping is guarded by a lock; the (slow) indicator computation fn() runs outside it
         d = self.d
-        cid = self.__dict__.get("_cid")
-        if cid is None:
-            _CACHE_SEQ[0] += 1
-            cid = self._cid = _CACHE_SEQ[0]
-        if key in d:
-            v = d.pop(key)
-            d[key] = v          # mark as recently used
-            g = _CACHE_LRU.pop((cid, key), None)
-            if g is not None:
-                _CACHE_LRU[(cid, key)] = g
-            return v
+        with _CACHE_LOCK:
+            cid = self.__dict__.get("_cid")
+            if cid is None:
+                _CACHE_SEQ[0] += 1
+                cid = self._cid = _CACHE_SEQ[0]
+            v = d.pop(key, _MISS)
+            if v is not _MISS:
+                d[key] = v          # mark as recently used
+                g = _CACHE_LRU.pop((cid, key), None)
+                if g is not None:
+                    _CACHE_LRU[(cid, key)] = g
+                return v
         v = fn()
         nb = self._nb(v)
-        d[key] = v
-        old = _CACHE_LRU.pop((cid, key), None)
-        if old is not None:
-            _CACHE_BYTES[0] -= old[1]
-        _CACHE_LRU[(cid, key)] = (weakref.ref(self), nb)
-        _CACHE_BYTES[0] += nb
-        while _CACHE_BYTES[0] > self.MAX_BYTES and len(_CACHE_LRU) > 1:
-            (c0, k0), (wr, nb0) = next(iter(_CACHE_LRU.items()))
-            del _CACHE_LRU[(c0, k0)]
-            _CACHE_BYTES[0] -= nb0
-            owner = wr()
-            if owner is not None:
-                owner.d.pop(k0, None)
+        with _CACHE_LOCK:
+            d[key] = v
+            old = _CACHE_LRU.pop((cid, key), None)
+            if old is not None:
+                _CACHE_BYTES[0] -= old[1]
+            _CACHE_LRU[(cid, key)] = (weakref.ref(self), nb)
+            _CACHE_BYTES[0] += nb
+            while _CACHE_BYTES[0] > self.MAX_BYTES and len(_CACHE_LRU) > 1:
+                (c0, k0), (wr, nb0) = next(iter(_CACHE_LRU.items()))
+                del _CACHE_LRU[(c0, k0)]
+                _CACHE_BYTES[0] -= nb0
+                owner = wr()
+                if owner is not None:
+                    owner.d.pop(k0, None)
         return v
 
 
 _CACHE_LRU = OrderedDict()     # (cache id, key) -> (weakref to cache, bytes); oldest first
 _CACHE_BYTES = [0]
 _CACHE_SEQ = [0]
+_CACHE_LOCK = threading.RLock()
+_MISS = object()
 
 
 def _trend(cc, n):

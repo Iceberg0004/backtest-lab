@@ -107,7 +107,7 @@ if ss.get("_tok") != _tok:
     for _k, _v in (_saved.get("settings") or {}).items():
         if _k in PERSIST_KEYS and _v is not None:
             ss[_k] = _v
-    for _k in ("job_search", "res_job", "sel", "job_scan", "scan_job", "res_scan"):
+    for _k in ("job_search", "res_job", "sel", "job_scan", "scan_job", "res_scan", "tool_jobs"):
         if _saved.get(_k) is not None:
             ss[_k] = _saved[_k]
     if ss.get("res_job") and not ss.get("res"):
@@ -137,7 +137,7 @@ def _json_ok(v):
 
 def _save_session():
     data = dict(settings={k: ss.get(k) for k in PERSIST_KEYS if k in ss and _json_ok(ss.get(k))})
-    for k in ("job_search", "res_job", "sel", "job_scan", "scan_job", "res_scan"):
+    for k in ("job_search", "res_job", "sel", "job_scan", "scan_job", "res_scan", "tool_jobs"):
         data[k] = ss.get(k)
     J.sess_save(ss["_tok"], data)
 

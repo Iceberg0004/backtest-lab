@@ -2,6 +2,7 @@
 realism (1-minute SL/TP check, funding/swap), walk-forward optimisation, portfolio, save & compare.
 Heavy tests only run when their button is pressed; results are kept in the session."""
 from __future__ import annotations
+import ui_bg as BG
 import json, math, time, datetime as dt
 import numpy as np
 import pandas as pd
@@ -170,10 +171,11 @@ def render_robust(ctx):
     a, b = st.columns([1, 3])
     n_perm = a.selectbox("Jumlah acakan", [100, 200, 500], index=1, key=f"np_{ctx['skey']}")
     if b.button("▶️ Jalankan tes harga acak", key=f"bp_{ctx['skey']}"):
-        bar = st.progress(0.0, text="Mengacak harga...")
-        t["perm"] = R.perm_test(o["fam"], o["params"], dfc, cfg, ctx["is_start"], n_perm,
-                                progress=lambda f: bar.progress(min(f, 1.0), text=f"Mengacak harga... {f * 100:.0f}%"), base=cc)
-        bar.empty()
+        _f, _p, _d, _c, _s, _b = o["fam"], o["params"], dfc, cfg, ctx["is_start"], cc
+        BG.launch(t, ctx["skey"], "perm", "Tes harga acak", lambda prog: R.perm_test(
+            _f, _p, _d, _c, _s, n_perm, progress=lambda f: prog(min(f, 1.0), f"Mengacak harga... {f * 100:.0f}%"), base=_b),
+            dict(n=n_perm))
+    BG.poll(t, ctx["skey"], "perm", "Tes harga acak")
     if "perm" in t:
         pt = t["perm"]
         fig = go.Figure(go.Histogram(x=pt["perm"] * 100, nbinsx=40, marker_color="#78909c", name="Harga acak"))
@@ -192,11 +194,11 @@ def render_robust(ctx):
     nps = a.selectbox("Jumlah acakan", [10, 20, 50], index=1, key=f"nps_{ctx['skey']}")
     nv = b.selectbox("Variasi per pencarian", [200, 300, 500], index=1, key=f"nv_{ctx['skey']}")
     if c.button("▶️ Jalankan tes pencarian acak", key=f"bps_{ctx['skey']}"):
-        bar = st.progress(0.0, text="Mencari di harga acak...")
-        t["perm_search"] = R.perm_search_test(dfc, cfg, ctx["is_start"], ctx["split"], nps, nv,
-                                              progress=lambda f: bar.progress(min(f, 1.0), text=f"Mencari di harga acak... {f * 100:.0f}%"),
-                                              base=cc)
-        bar.empty()
+        _d, _c, _s, _sp, _b = dfc, cfg, ctx["is_start"], ctx["split"], cc
+        BG.launch(t, ctx["skey"], "perm_search", "Tes pencarian acak", lambda prog: R.perm_search_test(
+            _d, _c, _s, _sp, nps, nv, progress=lambda f: prog(min(f, 1.0), f"Mencari di harga acak... {f * 100:.0f}%"), base=_b),
+            dict(n=nps, v=nv))
+    BG.poll(t, ctx["skey"], "perm_search", "Tes pencarian acak")
     if "perm_search" in t:
         ps = t["perm_search"]
         fig = go.Figure(go.Histogram(x=ps["perm"], nbinsx=20, marker_color="#78909c"))
@@ -216,8 +218,11 @@ def render_robust(ctx):
     jp = a.selectbox("Geser maksimal", [0.1, 0.2, 0.3], index=1, format_func=lambda x: f"±{x * 100:.0f}%", key=f"jp_{ctx['skey']}")
     jn = b.selectbox("Jumlah percobaan", [100, 200, 400], index=1, key=f"jn_{ctx['skey']}")
     if c.button("▶️ Jalankan tes geser parameter", key=f"bj_{ctx['skey']}"):
-        with st.spinner("Menguji..."):
-            t["jitter"] = R.jitter(o["fam"], o["params"], cc, ctx["is_start"], ctx["n"], cfg, jn, jp)
+        _f, _p, _s, _n, _c = o["fam"], o["params"], ctx["is_start"], ctx["n"], cfg
+        _cc = ctx["make_cache"](dfc, ctx["res"]["symbol"]) if ctx.get("make_cache") else cc   # own cache: the job runs in a thread
+        BG.launch(t, ctx["skey"], "jitter", "Tes geser parameter", lambda prog: R.jitter(_f, _p, _cc, _s, _n, _c, jn, jp),
+                  dict(n=jn, p=jp))
+    BG.poll(t, ctx["skey"], "jitter", "Tes geser parameter")
     if "jitter" in t:
         j = t["jitter"]
         fig = go.Figure(go.Histogram(x=j["pf"], nbinsx=40, marker_color="#26a69a"))
