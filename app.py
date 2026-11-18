@@ -239,8 +239,8 @@ def _on_source():
     ss.symbol = SOURCES[ss.source].symbols()[0]
     _restore_costs()
 T.hero()
-with st.container(border=True):
-    _m1, _m2, _m3 = st.columns([1.3, 1.3, 0.8])
+with st.container(border=True, key="mkt"):
+    _m1, _m2, _m3 = st.columns([1.25, 1.25, 0.75])
     _m1.selectbox("Sumber data", src_keys, key="source", format_func=lambda k: SOURCES[k].label, on_change=_on_source)
     src = SOURCES[ss.source]
     syms = src.symbols()
@@ -477,7 +477,8 @@ def selected_strategy():
 
 # ------------------------------------------------------------------ tabs
 # (title is in the hero header at the top)
-st.caption(f"{symbol} · {tf} · sumber: {src.label} · waktu ditampilkan dalam WIB (UTC+7)")
+with st.container(key="ctxcap"):
+    st.caption(f"{symbol} · {tf} · sumber: {src.label} · waktu ditampilkan dalam WIB (UTC+7)")
 def _top_summary(res):
     """Prominent result block at the top of 'Hasil': partial banner, best strategy card, top list."""
     out, meta = res["out"], res["meta"]
@@ -580,7 +581,7 @@ with t_live:
                 st.warning("Ada sinyal baru di candle yang baru tutup.")
             st.caption(f"Garis & label dari strategi: {E.describe(fam, p, res['cfg']['direction'])}")
         else:
-            st.caption("Pilih strategi di tab 'Hasil & Detail' untuk menampilkan garis indikator dan label Long/Short di chart ini.")
+            st.caption("Pilih strategi di tab '📊 Hasil' untuk menampilkan garis indikator dan label Long/Short di chart ini.")
         sub = df.iloc[-nbars:]
         _tv = ss.get("tv_on", True) and T.has_tv()
         if _tv:
@@ -759,9 +760,10 @@ def _open_scan(key):
     ss.res = r
     ss.res_job = None
     ss.res_scan = [ss.get("scan_job"), key] if ss.get("scan_job") else None
+    ss.nav_to = "📊 Hasil"
     ss.sel = None
     ss.source, ss.symbol, ss.tf = r["source"], r["symbol"], r["tf"]
-    ss.open_msg = f"{r['symbol']} {r['tf']} dibuka. Lihat tab 'Hasil & Detail'."
+    ss.open_msg = f"{r['symbol']} {r['tf']} dibuka. Lihat tab '📊 Hasil'."
 
 
 if ADV == "scan":
@@ -837,7 +839,7 @@ if ADV == "scan":
             if keys:
                 o1, o2 = st.columns([3, 1])
                 pick = o1.selectbox("Buka hasil pasar", keys, format_func=lambda k: " ".join(k.split("|")[1:]), key="scan_pick")
-                o2.button("Buka di 'Hasil & Detail'", on_click=_open_scan, args=(pick,), width='stretch')
+                o2.button("Buka di tab '📊 Hasil'", on_click=_open_scan, args=(pick,), width='stretch')
                 if ss.get("open_msg"):
                     st.success(ss.open_msg)
 
@@ -963,9 +965,15 @@ with t_res:
                                  f"Data lama (in-sample): {_im['net'] * 100:+.1f}%, PF {_im['pf']:.2f}, {_im['trades']} trade. "
                                  "Hasil uji data lama, bukan saran.")
             _summary_card(_card_slot)
-            d_chart, d_perf, d_ana, d_trades, d_sim, d_size, d_reg, d_meta, d_rob, d_bask, d_real, d_exp = st.tabs(
-                ["Chart", "Performance", "📐 Analitik", "Trades", "Simulation (Monte Carlo)", "💰 Ukuran posisi & Prop firm", "🌦️ Regime",
-                 "🤖 Meta-label", "🧪 Uji ketahanan", "🌍 Multi-aset", "🎯 Realisme", "Export & Simpan"])
+            # 4 groups instead of 12 tabs (easier on a phone); each group has small inner tabs
+            g_ct, g_perf, g_rob, g_exp = st.tabs(["📈 Chart & trade", "📊 Performa", "🧪 Uji ketahanan", "💾 Pine & simpan"])
+            with g_ct:
+                d_chart, d_trades = st.tabs(["Chart", "Daftar trade"])
+            with g_perf:
+                d_perf, d_ana, d_sim, d_size = st.tabs(["Ringkasan", "📐 Analitik", "Monte Carlo", "💰 Ukuran posisi & Prop firm"])
+            with g_rob:
+                d_rob, d_bask, d_real, d_reg, d_meta = st.tabs(["🧪 Tes ketahanan", "🌍 Multi-aset", "🎯 Realisme", "🌦️ Regime", "🤖 Meta-label"])
+            d_exp = g_exp
             with d_ana:
                 V.render_analytics(ctx, ftr)
                 V.render_sensitivity(ctx)
@@ -1185,6 +1193,7 @@ def _open_hist(jid):
     if r.get("source") in SOURCES:
         ss.source, ss.symbol, ss.tf = r["source"], r["symbol"], r["tf"]
     ss.hist_msg = f"{r['symbol']} {r['tf']} dibuka. Lihat tab '📊 Hasil'."
+    ss.nav_to = "📊 Hasil"
 
 
 with t_hist:

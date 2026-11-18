@@ -557,7 +557,7 @@ def render_scan_matrix(rows):
         return
     st.markdown("#### 🧮 Matriks rapor (pasar × timeframe × strategi)")
     st.caption("Nilai = rapor singkat 0-100 (lolos tes ketat versi dasar, Deflated Sharpe, PBO) dari variasi terbaik in-sample tiap jenis "
-               "strategi. Semakin hijau semakin kuat. Ini versi cepat; rapor lengkap ada setelah dibuka di 'Hasil & Detail'.")
+               "strategi. Semakin hijau semakin kuat. Ini versi cepat; rapor lengkap ada setelah dibuka di tab '📊 Hasil'.")
     mk = sorted({r["Pasar"] for r in rows}); tfs = [t for t in ["5m", "15m", "30m", "1h", "2h", "4h", "1d"] if any(r["TF"] == t for r in rows)]
     Z = np.full((len(mk), len(tfs)), np.nan); T = np.full(Z.shape, "", object)
     for r in rows:

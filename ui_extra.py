@@ -99,7 +99,7 @@ def render_report(ctx):
         f"<div style='padding:10px 14px;border-radius:8px;background:#1e1e1e;border-left:6px solid {colors.get(letter, '#888')}'>"
         f"<span style='font-size:1.6em;font-weight:700;color:{colors.get(letter, '#888')}'>Rapor ketahanan: {letter}</span> "
         f"<span style='font-size:1.2em'>· {score:.0f}/100</span><br><span style='color:#aaa'>Dihitung dari {done} dari 8 tes. "
-        f"Tes lain bisa dijalankan di tab 'Uji ketahanan', 'Multi-aset' dan halaman 'Walk-forward'. "
+        f"Tes lain ada di bagian '🧪 Uji ketahanan' (Tes ketahanan, Multi-aset) dan alat 'Walk-forward' di '🧰 Alat lanjutan'. "
         f"Ini hasil uji data lama, bukan jaminan dan bukan saran.</span></div>", unsafe_allow_html=True)
     if "cap_d" in parts:
         st.warning("Nilai dibatasi maksimal D: strategi ini rugi di data unseen / in-sample, atau ada tanda overfitting.")

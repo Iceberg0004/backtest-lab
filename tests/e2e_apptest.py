@@ -203,7 +203,7 @@ if "scan" in flags:
         print("  ", {k: (round(v, 2) if isinstance(v, float) else v) for k, v in r.items() if k not in ("key", "best_idx")})
     keys = [r["key"] for r in rows if r.get("key")]
     if keys:
-        click("Buka di 'Hasil & Detail'")
+        click("Buka di tab '📊 Hasil'")
         print("opened", at.session_state["res"]["symbol"], at.session_state["res"]["tf"], "exceptions", at.exception)
 print("exceptions", at.exception)
 print("total", round(time.time() - t0, 1), "s")

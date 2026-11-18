@@ -52,7 +52,17 @@ CSS = f"""<style>
   [data-testid="stHorizontalBlock"] {{gap: .4rem; flex-wrap: wrap !important;}}
   [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{min-width: calc(50% - .4rem) !important;
     flex: 1 1 calc(50% - .4rem) !important; width: calc(50% - .4rem) !important;}}
-  .bt-hero .bt-tags {{display: none;}}
+  .bt-hero .bt-tags, .bt-hero p {{display: none;}}
+  .bt-hero {{padding: .5rem .8rem !important; border-radius: 12px !important;}}
+  .bt-hero h1 {{font-size: 1.08rem !important;}}
+  .st-key-mkt {{padding: .45rem .5rem !important;}}
+  .st-key-mkt [data-testid="stHorizontalBlock"] {{flex-wrap: nowrap !important; gap: .3rem !important;}}
+  .st-key-mkt [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{min-width: 0 !important; width: auto !important; flex: 1.3 1 0 !important;}}
+  .st-key-mkt [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child {{flex: .8 1 0 !important;}}
+  .st-key-mkt [data-testid="stWidgetLabel"] {{display: none;}}
+  .st-key-mkt [data-baseweb="select"] > div {{min-height: 2.3rem; font-size: .85rem;}}
+  .st-key-ctxcap {{display: none;}}
+  .block-container {{padding-top: .4rem !important;}}
   .bt-hero {{margin-bottom: .5rem;}}
   [data-testid="stMetricValue"] {{font-size: 1.05rem !important;}}
   [data-testid="stMetric"] {{padding: .45rem .55rem !important;}}
