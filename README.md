@@ -61,7 +61,7 @@ New "⚖️ Compare exits" tool (same entry, many exits, ranked by unseen data).
 ZLEMA/ALMA/T3/McGinley, ribbon, UT Bot, SSL, QQE, WaveTrend, Chandelier entry, Range filter, Gaussian, candle patterns, gap fill,
 level breakouts / Asian range, opening drive, Larry Williams, POC, OBV/AD/CMF divergence, %B, Donchian mid, ROC, RSI-2;
 v7.1: relative strength vs BTC for Binance alts).
-Pine parity (PineTS): indicator 112/112; strategy ~95% (all differences use TP1/TP2 partial orders).
+Pine parity (PineTS): indicator 117/117 and strategy 117/117 (v9: TP1/TP2 partials are exported as separate entry legs, each with its own stop + target, so TradingView's trade list matches the app leg by leg; 30 of the cases use partials). Remaining known difference: when SL and TP are touched in the same candle, TradingView picks the order itself (the app assumes SL first).
 See README_ID.md for the full list by category.
 
 ## Tes
@@ -110,7 +110,7 @@ Catatan Streamlit Cloud gratis:
 
 ## v8 / v9: background jobs, mobile layout and UI components
 
-- **Searches and scans run on the server in a background job.** Minimizing the phone, locking it, or reloading the page no longer restarts the search: the page URL carries a session token (`?s=...`), so the page reattaches to the running job or loads the finished result from disk. Results are kept for 24 hours (300 MB cap); a restart of the free server clears them. The same settings never start the same job twice.
+- **Searches and scans run on the server in a background job.** Minimizing the phone, locking it, or reloading the page no longer restarts the search: the page URL carries a session token (`?s=...`), so the page reattaches to the running job or loads the finished result from disk. Results are kept for 24 hours (300 MB cap) in the job folder; since v9 every finished search/scan is also kept in a local SQLite archive (150 MB / 200 results) and can be downloaded as one `.btlab` file from Riwayat and uploaded again later (no account or token). A full rebuild of the free server clears the server copy, the downloaded file keeps it. Uploaded files are loaded with a strict allow-list (plain data only), never the normal unpickler. The same settings never start the same job twice.
 - **Simpler layout:** market and timeframe on the main page, one big start button, advanced options folded away, 6 tabs, a result summary card (grade, unseen profit, drawdown, PF, win rate), and a history tab.
 
 ### Open-source UI components (thank you)
