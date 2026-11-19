@@ -254,10 +254,11 @@ def effective_trials(M):
     """Effective number of independent trials from the correlation of the trials' daily returns
     (participation ratio of the eigenvalues). Many variants are near copies of each other
     (EMA 20/100 vs EMA 21/100), so the effective number is much smaller than the raw count."""
-    M = np.asarray(M, float)
+    M = np.asarray(M)                 # trials are stored as float32; convert row blocks only (no full float64 temporaries)
     if M.ndim != 2 or M.shape[0] < 3:
         return None
-    M = M[M.std(1) > 0]
+    keep = np.concatenate([np.asarray(M[i:i + 64], float).std(1) > 0 for i in range(0, len(M), 64)])
+    M = np.asarray(M[keep], float)
     if len(M) < 3:
         return None
     ev = np.clip(np.linalg.eigvalsh(np.corrcoef(M)), 0, None)
@@ -289,13 +290,16 @@ def pbo_cscv(M, S=12):
     Split days into S blocks; for every half/half combination pick the best variant on one half
     and look at its rank on the other half. PBO = share of combinations where the 'winner' ranks
     in the bottom half out-of-sample. < 0.2 good, > 0.5 = the selection process mostly picks luck."""
-    M = np.asarray(M, float)
+    M = np.asarray(M)                 # float32 trials: convert one block at a time (no full float64 copy)
     if M.ndim != 2 or M.shape[0] < 10 or M.shape[1] < S * 10:
         return None
     N, T = M.shape
     blocks = np.array_split(np.arange(T), S)
-    bs = np.stack([M[:, b].sum(1) for b in blocks])          # S x N
-    bq = np.stack([(M[:, b] ** 2).sum(1) for b in blocks])    # S x N
+    bs, bq = [], []
+    for b in blocks:                                          # blocks are contiguous column ranges
+        mb = np.array(M[:, b[0]:b[-1] + 1], float, order="F")   # same layout as M[:, b] -> bit-identical sums
+        bs.append(mb.sum(1)); bq.append((mb ** 2).sum(1))
+    bs, bq = np.stack(bs), np.stack(bq)                       # S x N
     bc = np.array([len(b) for b in blocks], float)            # S
     combos = np.array([[1.0 if s in c else 0.0 for s in range(S)] for c in combinations(range(S), S // 2)])
     def sr(mask):
