@@ -8,6 +8,17 @@ from pathlib import Path
 import pandas as pd
 import requests
 
+# Arrow's default allocator (mimalloc/jemalloc) keeps freed buffers in its own arenas, so every parquet read left
+# ~20-60 MB behind in the process (measured: 5 cached 1h FX files -> +128 MB RSS). The plain system allocator hands
+# memory back to glibc, where gc + malloc_trim can return it (same files -> +31 MB). Reads take ~10 ms longer per file.
+# VELA_ARROW_POOL=default keeps Arrow's own pool.
+if os.environ.get("VELA_ARROW_POOL", "system") == "system":
+    try:
+        import pyarrow as _pa
+        _pa.set_memory_pool(_pa.system_memory_pool())
+    except Exception:
+        pass
+
 def _pick_cache_dir() -> Path:
     """Prefer a writable dir. Streamlit Community Cloud (and similar hosts) have
     ephemeral disks; /tmp is always writable. VELA_CACHE overrides the default."""
@@ -45,7 +56,7 @@ def _cache_path(source, symbol, tf):
 
 def _load_cache(p):
     if p.exists():
-        df = pd.read_parquet(p)
+        df = pd.read_parquet(p, use_threads=False)   # small files: threads add arena memory, not speed (~10 ms either way)
         df.index = pd.to_datetime(df.index, utc=True)
         return df
     return None
