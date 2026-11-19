@@ -1193,7 +1193,7 @@ if ADV == "sig":
 def _open_hist(jid):
     r = J.result(jid)
     if not r:
-        ss.hist_err = "Hasil ini sudah tidak ada (dihapus setelah 24 jam atau server dimulai ulang)."
+        ss.hist_err = "Hasil ini sudah tidak ada di server. Pulihkan dari file .btlab kalau pernah disimpan."
         return
     kind = J._meta(jid).get("kind")
     if kind == "scan":
@@ -1213,14 +1213,35 @@ def _open_hist(jid):
 
 
 with t_hist:
-    st.caption("Hasil pencarian & scan tersimpan di server selama 24 jam (bisa dibuka lagi walau HP sempat ditutup). "
-               "Kalau server gratis dimulai ulang, riwayat ikut hilang.")
+    st.caption("Hasil pencarian & scan disimpan otomatis di server (lebih dari 24 jam). Kalau server gratis dibangun ulang, "
+               "riwayat di server bisa hilang, jadi simpan juga ke file di HP/laptop lalu pulihkan kapan saja.")
     if ss.get("hist_msg"):
         st.success(ss.pop("hist_msg"))
     if ss.get("hist_err"):
         st.warning(ss.pop("hist_err"))
+    from core import archive as _AR
+    with st.expander("💾 Simpan / pulihkan riwayat (file .btlab)"):
+        try:
+            _n_ar, _sz_ar = _AR.count()
+        except Exception:
+            _n_ar, _sz_ar = 0, 0
+        st.caption(f"Tersimpan: {_n_ar} hasil ({_sz_ar / 1e6:.1f} MB). Tidak perlu akun atau token.")
+        if _n_ar and st.button("Siapkan file riwayat", key="ar_prep", width='stretch'):
+            ss["ar_file"] = _AR.export_bytes()
+        if ss.get("ar_file"):
+            st.download_button("⬇️ Unduh riwayat (.btlab)", ss["ar_file"],
+                               file_name=f"riwayat_backtest_{pd.Timestamp.now(tz=TZ).strftime('%Y%m%d_%H%M')}.btlab",
+                               mime="application/zip", key="ar_dl", width='stretch')
+        _up = st.file_uploader("Pulihkan dari file .btlab", type=["btlab", "zip"], key="ar_up")
+        if _up is not None and ss.get("ar_done") != _up.file_id:
+            ss["ar_done"] = _up.file_id
+            try:
+                _a, _sk, _er = _AR.import_bytes(_up.getvalue())
+                st.success(f"Dipulihkan {_a} hasil, {_sk} sudah ada" + (f", {len(_er)} ditolak (bukan data hasil yang valid)." if _er else "."))
+            except Exception as _e:
+                st.error(f"File tidak bisa dipakai: {_e}")
     # tool jobs (random-price test, WFO, report, ...) are stored too, but only searches & scans can be opened here
-    _h = [m for m in J.history(limit=200) if m.get("kind") in (None, "", "search", "scan")][:25]
+    _h = [m for m in J.history(limit=300) if m.get("kind") in (None, "", "search", "scan")][:40]
     if not _h:
         st.info("Belum ada riwayat.")
     for _m in _h:

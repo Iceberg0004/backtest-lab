@@ -317,14 +317,14 @@ nxDay := xDayI
 
 ORDERS = r"""
 // ==== order TradingView mengikuti simulasi di atas ====
+// TP sebagian: posisi dibuka sebagai beberapa "kaki" (entry terpisah, masing-masing punya SL + targetnya sendiri):
+// kaki 1 = porsi TP1, kaki 2 = porsi TP2, kaki utama = sisanya (target akhir). Kena SL -> semua kaki tutup di harga yang sama.
+// Ini sama dengan aplikasi (TP sebagian lalu stop pindah ke breakeven / trailing untuk sisa posisi).
+f_qty(fr) => fr * strategy.equity * levC / close
 if pos == 0 and nxDir == 0 and strategy.position_size != 0
     strategy.close_all(comment="Sinkron")
 if nxExit and pos != 0 and nxDir == 0
     strategy.close_all(comment=nxXr == 0 ? "Exit" : nxXr == 4 ? "Waktu habis" : nxXr == 6 ? "Time stop" : "Tutup sesi")
-if nxDir == 1 and nxOk and not na(nxR)
-    strategy.entry("Long", strategy.long)
-else if nxDir == -1 and nxOk and not na(nxR)
-    strategy.entry("Short", strategy.short)
 float oStop = na
 float oTp = na
 float oT1 = na
@@ -332,8 +332,10 @@ float oT2 = na
 bool oP1 = false
 bool oP2 = false
 int oDir = 0
+bool oNew = false
 if nxDir != 0 and nxOk and not na(nxR)
     oDir := nxDir
+    oNew := true
     oStop := slNone ? na : nxC - nxDir * nxR
     oTp := nxTp
     oT1 := tp1R > 0 ? nxC + nxDir * tp1R * nxR : na
@@ -354,18 +356,31 @@ else if pos != 0 and not nxExit
     oP2 := not na(tg2) and not p2
 if oDir != 0
     string idE = oDir == 1 ? "Long" : "Short"
+    float rest = 1.0 - (na(oT1) ? 0.0 : tp1F) - (na(oT2) ? 0.0 : tp2F)
+    bool split = oP1 or oP2
+    if oNew
+        if split
+            if oP1
+                strategy.entry(idE + "-1", oDir == 1 ? strategy.long : strategy.short, qty=f_qty(tp1F))
+            if oP2
+                strategy.entry(idE + "-2", oDir == 1 ? strategy.long : strategy.short, qty=f_qty(tp2F))
+            if rest > 1e-9
+                strategy.entry(idE, oDir == 1 ? strategy.long : strategy.short, qty=f_qty(rest))
+        else
+            strategy.entry(idE, oDir == 1 ? strategy.long : strategy.short)
     if oP1
-        strategy.exit(idE + "-TP1", idE, qty_percent=tp1F * 100, stop=oStop, limit=oT1)
+        strategy.exit(idE + "-TP1", idE + "-1", stop=oStop, limit=oT1)
     if oP2
-        strategy.exit(idE + "-TP2", idE, qty_percent=tp2F * 100, stop=oStop, limit=oT2)
-    if not na(oStop) or not na(oTp)
+        strategy.exit(idE + "-TP2", idE + "-2", stop=oStop, limit=oT2)
+    if rest > 1e-9 and (not na(oStop) or not na(oTp))
         strategy.exit(idE + "-SL/TP", idE, stop=oStop, limit=oTp)
 """
 
 
+
 NOTES = ("// Catatan versi strategy(): order TradingView mengikuti simulasi yang sama dengan aplikasi (masuk/keluar di candle yang sama).\\n"
          "// Kalau dalam SATU candle stop loss dan take profit sama-sama tersentuh, TradingView menebak urutannya sendiri,\\n"
-         "// sedangkan aplikasi menganggap stop loss duluan. TP sebagian memakai qty_percent. Karena itu harga keluar di strategy()\\n"
+         "// sedangkan aplikasi menganggap stop loss duluan. TP sebagian dibuka sebagai entry terpisah per porsi. Karena itu harga keluar di strategy()\\n"
          "// bisa sedikit beda. Versi indicator() menghitung posisi sendiri dan sama persis dengan aplikasi.")
 
 
@@ -451,7 +466,7 @@ def to_pine(fam, p, direction, title, symbol, tf, cost_pct, leverage=1.0, stats_
 strategy("{name} - {symbol} {tf}", overlay=true, initial_capital=10000,
      default_qty_type=strategy.percent_of_equity, default_qty_value={100 * leverage:g},
      commission_type=strategy.commission.percent, commission_value={cost_pct:.4f},
-     pyramiding=0, process_orders_on_close=false, margin_long={0 if leverage <= 1 else round(100 / leverage, 2):g}, margin_short={0 if leverage <= 1 else round(100 / leverage, 2):g})
+     pyramiding=3, process_orders_on_close=false, margin_long={0 if leverage <= 1 else round(100 / leverage, 2):g}, margin_short={0 if leverage <= 1 else round(100 / leverage, 2):g})
 {hdr}
 {sig}
 {SIM}

@@ -134,7 +134,7 @@ dan alasan keluar. Di tab Robust ada **⚖️ Bandingkan exit**: sinyal masuk sa
 (baris teratas cenderung terlalu bagus karena dipilih dari unseen; lebih aman pilih yang untung di in-sample dan unseen).
 
 **Pine**: versi indicator sama persis dengan aplikasi di semua kasus tes (112) (PineTS), termasuk semua jenis SL/TP/trailing baru.
-Versi strategy sama di ±95% kasus; yang beda semuanya memakai TP1/TP2 (mesin order TradingView kadang menggabung / melewati satu leg).
+Versi strategy sekarang sama di 117 dari 117 kasus uji (v9): TP1/TP2 dibuat sebagai entry terpisah per porsi, jadi daftar trade TradingView sama dengan aplikasi. Beda yang tersisa: kalau SL dan TP tersentuh di candle yang sama, TradingView menebak urutannya sendiri.
 
 **Strategi yang ada (69 jenis), per kategori**
 - Tren / MA: MA cross (SMA/EMA, termasuk golden/death cross), 2 MA + filter, Hull/TEMA/KAMA, ZLEMA/ALMA/T3/McGinley, MA ribbon (triple MA),
@@ -205,6 +205,6 @@ API key OANDA atau Twelve Data (opsional) diisi di Secrets Streamlit Cloud denga
 
 ## v8 / v9: pencarian jalan di server + tampilan baru
 
-- **Pencarian & scan jalan di server.** Minimize / kunci HP / muat ulang halaman tidak mengulang pencarian: alamat halaman membawa kode sesi (`?s=...`), jadi halaman tersambung lagi ke pekerjaan yang sedang jalan atau membuka hasil yang sudah selesai. Hasil disimpan 24 jam. Kalau server gratis dimulai ulang, hasil ikut hilang.
+- **Pencarian & scan jalan di server.** Minimize / kunci HP / muat ulang halaman tidak mengulang pencarian: alamat halaman membawa kode sesi (`?s=...`), jadi halaman tersambung lagi ke pekerjaan yang sedang jalan atau membuka hasil yang sudah selesai. Hasil juga disimpan otomatis di arsip server (lebih dari 24 jam). Di tab Riwayat ada tombol **Simpan / pulihkan riwayat**: unduh semua hasil sebagai file `.btlab`, lalu unggah lagi kapan saja (misalnya setelah server gratis dibangun ulang). Tidak perlu akun atau token.
 - **Lebih simpel:** pilih pasar & timeframe di halaman utama, satu tombol besar, pengaturan lanjutan dilipat, 6 tab, kartu ringkasan hasil, dan tab Riwayat.
 - **Komponen open-source:** streamlit-extras (Apache-2.0), streamlit-shadcn-ui (MIT), streamlit-lightweight-charts (MIT, chart TradingView). Kalau komponen gagal dimuat, aplikasi otomatis memakai tampilan Streamlit biasa.
