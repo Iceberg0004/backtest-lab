@@ -62,7 +62,7 @@ CSS = f"""<style>
   .st-key-mkt [data-testid="stWidgetLabel"] {{display: none;}}
   .st-key-mkt [data-baseweb="select"] > div {{min-height: 2.3rem; font-size: .85rem;}}
   .st-key-ctxcap {{display: none;}}
-  .block-container {{padding-top: .4rem !important;}}
+  .block-container {{padding-top: 3.2rem !important;}}   /* clear the fixed Streamlit header (it covered the title) */
   .bt-hero {{margin-bottom: .5rem;}}
   [data-testid="stMetricValue"] {{font-size: 1.05rem !important;}}
   [data-testid="stMetric"] {{padding: .45rem .55rem !important;}}

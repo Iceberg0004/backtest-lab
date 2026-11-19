@@ -778,7 +778,7 @@ if ADV == "scan":
         scan_src = sc1.selectbox("Sumber", ["binance", "dukascopy"], format_func=lambda k: SOURCES[k].label, key="scan_src")
         all_syms = SOURCES[scan_src].symbols()
         dflt = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"] if scan_src == "binance" else ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "US30", "NAS100"]
-        scan_syms = sc1.multiselect("Pasar", all_syms, default=[x for x in dflt if x in all_syms], key=f"scan_syms_{scan_src}")
+        scan_syms = st.multiselect("Pasar", all_syms, default=[x for x in dflt if x in all_syms], key=f"scan_syms_{scan_src}")
         scan_tfs = sc2.multiselect("Timeframe", ["5m", "15m", "30m", "1h", "4h", "1d"], key="scan_tfs")
         sc3, sc4 = st.columns(2)
         scan_var = sc3.select_slider("Variasi per pasar", [300, 500, 1000, 2000, 3000], key="scan_var")
