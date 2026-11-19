@@ -335,12 +335,21 @@ def filter_masks(p, cc):
     return L, S, lines
 
 
+def _as_bool(a):
+    """Same as np.nan_to_num(np.asarray(a, float), nan=0).astype(bool) (NaN -> False, any other non-zero incl. inf -> True),
+    without the float round trip for arrays that are already boolean. Always returns a new array."""
+    a = np.asarray(a)
+    if a.dtype == np.bool_:
+        return a.copy()
+    a = np.asarray(a, float)
+    return (a != 0) & (a == a)
+
+
 def signals(fam, p, cc: Cache):
     """Returns (long_entry, long_exit, short_entry, short_exit, lines) evaluated at bar close."""
     p = full_params(p)
     le, lx, se, sx, lines = FAMILIES[fam]["py"](p, cc)
-    f = lambda a: np.nan_to_num(np.asarray(a, float), nan=0).astype(np.bool_)
-    le, lx, se, sx = f(le), f(lx), f(se), f(sx)
+    le, lx, se, sx = _as_bool(le), _as_bool(lx), _as_bool(se), _as_bool(sx)
     if p.get("exit_sig", 0) == 1:   # exit only on the opposite raw signal
         lx, sx = se.copy(), le.copy()
     L, S, fl = filter_masks(p, cc)
