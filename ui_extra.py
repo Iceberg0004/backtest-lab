@@ -262,31 +262,27 @@ def render_basket(ctx):
     if st.button("▶️ Jalankan tes multi-aset", key=f"bb_{ctx['skey']}"):
         costs = {s_: ctx["cost_for"](s_, 1.0) for s_ in basket}      # read the cost settings here (the job runs in a thread)
         _load, _mk, _f, _p, _cfg = ctx["load_symbol_raw"], ctx["make_cache"], o["fam"], o["params"], cfg
-        _nw = 3 if res["source"] == "dukascopy" else 5
 
         def _basket(progress=None, basket=tuple(basket)):
-            from concurrent.futures import ThreadPoolExecutor
-            if progress:
-                progress(0.05, f"Mengambil data {', '.join(basket)} (pertama kali bisa beberapa menit)...")
-
-            def job(s_):
+            # v9.2: one asset at a time (load -> cache -> test -> free) so only one cache is in memory, not all of them
+            import gc
+            rows, errs = [], []
+            for k, s_ in enumerate(basket):
+                if progress:
+                    progress(0.05 + 0.9 * k / max(1, len(basket)), f"Aset {k + 1}/{len(basket)}: {s_} (ambil data lalu uji)...")
                 try:
-                    return s_, _load(s_), None
+                    d = _load(s_)
                 except Exception as e:
-                    return s_, None, str(e)
-            with ThreadPoolExecutor(max_workers=_nw) as ex:
-                got = list(ex.map(job, basket))
-            if progress:
-                progress(0.6, "Menguji strategi di tiap aset...")
-            items, errs = [], []
-            for s_, d, err in got:
-                if err:
-                    errs.append(f"{s_}: {err}"); continue
+                    errs.append(f"{s_}: {e}"); continue
                 if d is None or len(d) < 600:
                     errs.append(f"{s_}: data terlalu sedikit"); continue
                 cf, ca = costs[s_]
-                items.append((s_, _mk(d, s_), cf, ca))
-            return dict(rows=R.basket_test(_f, _p, items, _cfg, _cfg["oos_pct"]), errs=errs)
+                cc_ = _mk(d, s_)
+                del d
+                rows += R.basket_test(_f, _p, [(s_, cc_, cf, ca)], _cfg, _cfg["oos_pct"])
+                del cc_
+                gc.collect()
+            return dict(rows=rows, errs=errs)
         BG.launch(t, ctx["skey"], "basket_job", "Tes multi-aset", forked(_basket), dict(b=list(basket)))
     BG.poll(t, ctx["skey"], "basket_job", "Tes multi-aset")
     if "basket_job" in t:
