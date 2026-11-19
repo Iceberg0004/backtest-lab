@@ -76,14 +76,80 @@ def atr(high, low, close, n=14):
     return rma(tr, n)
 
 
-def rolling_max(x, n):
+@njit(cache=True)
+def _roll_max(x, n):
+    """Rolling max over n bars with a monotonic deque (O(len)); same output as pandas Series.rolling(n).max():
+    NaN for the first n-1 bars and for any window that contains a NaN or +/-inf (pandas treats inf like NaN)."""
+    m = x.shape[0]
+    out = np.empty(m)
+    dq = np.empty(m, np.int64)
+    head = 0
+    tail = 0
+    last_bad = -1
+    for i in range(m):
+        v = x[i]
+        if v - v != 0.0:          # NaN or +/-inf
+            last_bad = i
+        else:
+            while tail > head and x[dq[tail - 1]] <= v:
+                tail -= 1
+            dq[tail] = i
+            tail += 1
+        if tail > head and dq[head] <= i - n:
+            head += 1
+        if i >= n - 1 and last_bad <= i - n:
+            out[i] = x[dq[head]]
+        else:
+            out[i] = np.nan
+    return out
+
+
+@njit(cache=True)
+def _roll_min(x, n):
+    """Rolling min over n bars with a monotonic deque (O(len)); same output as pandas Series.rolling(n).min():
+    NaN for the first n-1 bars and for any window that contains a NaN or +/-inf (pandas treats inf like NaN)."""
+    m = x.shape[0]
+    out = np.empty(m)
+    dq = np.empty(m, np.int64)
+    head = 0
+    tail = 0
+    last_bad = -1
+    for i in range(m):
+        v = x[i]
+        if v - v != 0.0:          # NaN or +/-inf
+            last_bad = i
+        else:
+            while tail > head and x[dq[tail - 1]] >= v:
+                tail -= 1
+            dq[tail] = i
+            tail += 1
+        if tail > head and dq[head] <= i - n:
+            head += 1
+        if i >= n - 1 and last_bad <= i - n:
+            out[i] = x[dq[head]]
+        else:
+            out[i] = np.nan
+    return out
+
+
+def _rolling_pd(x, n, how):
     import pandas as pd
-    return pd.Series(x).rolling(n).max().to_numpy()
+    r = pd.Series(x).rolling(n)
+    return (r.max() if how else r.min()).to_numpy()
+
+
+def rolling_max(x, n):
+    a = np.asarray(x)
+    if a.ndim != 1 or not isinstance(n, (int, np.integer)) or n < 1 or a.dtype.kind not in "biuf":
+        return _rolling_pd(x, n, True)
+    return _roll_max(np.ascontiguousarray(a, dtype=np.float64), int(n))
 
 
 def rolling_min(x, n):
-    import pandas as pd
-    return pd.Series(x).rolling(n).min().to_numpy()
+    a = np.asarray(x)
+    if a.ndim != 1 or not isinstance(n, (int, np.integer)) or n < 1 or a.dtype.kind not in "biuf":
+        return _rolling_pd(x, n, False)
+    return _roll_min(np.ascontiguousarray(a, dtype=np.float64), int(n))
 
 
 def shift(x, k=1):
