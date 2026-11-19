@@ -143,11 +143,12 @@ def _save_session():
 
 
 @st.fragment(run_every=2)
-def job_panel(jid, what):
+def job_panel(jid, what, done_tab="📊 Hasil"):
     """Progress of a background job. Re-checks every 2 s; when it is done the whole page refreshes to show the result."""
     s_ = J.status(jid)
     if not s_ or s_["state"] not in ("antri", "jalan"):
-        ss.nav_to = "📊 Hasil"
+        if s_ and s_["state"] == "selesai" and done_tab:
+            ss.nav_to = done_tab       # failed job: stay on this tab so the error message is visible
         st.rerun()
         return
     st.progress(s_["frac"], text=s_["text"] or "Berjalan...")
@@ -596,88 +597,89 @@ with t_live:
 with t_search:
     st.caption(f"Pasar **{symbol} · {tf}** · {len(ss.families)} jenis strategi · {ss.n_variants:,} variasi · "
                f"target PF ≥ {ss.min_pf:g}, drawdown ≤ {ss.max_dd:g}%. Ubah di 'Pengaturan lanjutan' kalau perlu.")
-    with st.expander("⚙️ Pengaturan lanjutan (target, biaya, mode, jenis strategi, SL/TP)"):
-        st.subheader("Tulis target dengan kalimat biasa (opsional)")
-        c1, c2 = st.columns([4, 1])
-        c1.text_input("Contoh: BTC 1h trend, profit factor 1.5+, drawdown di bawah 20%", key="prompt",
-                      label_visibility="collapsed", placeholder="BTC 1h trend strategy, profit factor 1.5+, drawdown under 20%")
-        c2.button("Terapkan", on_click=apply_prompt, width='stretch')
-        if ss.get("prompt_msg"):
-            st.caption(f"Terbaca: {ss.prompt_msg}")
+    with st.container(key="setx"):   # phone CSS stacks the settings columns full-width
+        with st.expander("⚙️ Pengaturan lanjutan (target, biaya, mode, jenis strategi, SL/TP)"):
+            st.subheader("Tulis target dengan kalimat biasa (opsional)")
+            c1, c2 = st.columns([4, 1])
+            c1.text_input("Contoh: BTC 1h trend, profit factor 1.5+, drawdown di bawah 20%", key="prompt",
+                          label_visibility="collapsed", placeholder="BTC 1h trend strategy, profit factor 1.5+, drawdown under 20%")
+            c2.button("Terapkan", on_click=apply_prompt, width='stretch')
+            if ss.get("prompt_msg"):
+                st.caption(f"Terbaca: {ss.prompt_msg}")
 
-        st.subheader("Pengaturan backtest")
-        a, b, c = st.columns(3)
-        with a:
-            st.radio("Arah trade", ["both", "long", "short"], key="direction", format_func=DIR_LABEL.get, horizontal=True)
-            st.slider("Data 'unseen' / out-of-sample (%)", 10, 50, key="oos_pct",
-                      help="Bagian data paling baru yang TIDAK dipakai saat mencari. Strategi harus tetap bagus di sini.")
-            st.slider("Jumlah periode walk-forward", 2, 8, key="folds",
-                      help="Data in-sample dibagi beberapa periode; strategi harus untung di sebagian besar periode.")
-            st.slider("Minimal periode yang untung (%)", 0, 100, key="min_wf")
-        with b:
-            st.number_input("Profit factor minimal", 1.0, 5.0, step=0.1, key="min_pf")
-            st.number_input("Win rate minimal (%)", 0.0, 90.0, step=5.0, key="min_wr")
-            st.number_input("Drawdown maksimal (%)", 1.0, 90.0, step=1.0, key="max_dd")
-            st.number_input("Jumlah trade minimal (in-sample)", 5, 2000, step=10, key="min_trades")
-            st.number_input("Profit factor minimal di data unseen", 0.5, 5.0, step=0.1, key="oos_min_pf")
-        with c:
-            if ss.source == "binance":
-                st.selectbox("Preset biaya", list(CRYPTO_PRESETS), key="crypto_preset", on_change=_apply_preset,
-                             help="Contoh tarif umum. Angka di bawah tetap bisa diubah.")
-                st.number_input("Fee per transaksi (%)", 0.0, 1.0, step=0.01, key="fee")
-                st.number_input("Slippage per transaksi (%)", 0.0, 1.0, step=0.01, key="slip")
-            else:
-                pip = src.pip_size(symbol) or 0.0001
-                st.selectbox("Preset akun broker", list(FX_PRESETS), key="fx_preset", on_change=_apply_preset,
-                             help="Contoh saja (bukan broker tertentu). Spread disimpan per pasar selama sesi ini dan tetap bisa diubah.")
-                st.number_input(f"Spread {symbol} (pip) · 1 pip = {pip:g}", 0.0, 50.0, step=0.1, key="spread", on_change=_remember_costs)
-                st.number_input("Slippage per sisi (pip)", 0.0, 20.0, step=0.1, key="fx_slip")
-                st.number_input("Komisi per sisi (%)", 0.0, 0.5, step=0.001, format="%.3f", key="fx_comm")
-            st.number_input("Ukuran posisi (x modal, 1 = tanpa leverage)", 0.1, 20.0, step=0.5, key="lev")
-            st.checkbox("Rapor pakai DSR versi ketat (buku teks)", key="strict_dsr",
-                        help="Anggap semua variasi yang dicoba benar-benar terpisah. Nilai rapor jadi lebih pelit. Bisa diubah kapan saja.")
-            st.slider("Minimal parameter tetangga yang tetap untung (%)", 0, 100, key="min_stab",
-                      help="Kalau EMA 11/36 bagus tapi 12/35 hancur, berarti cuma kebetulan.")
-            if ss.source == "binance":
-                st.checkbox("Hitung funding rate (seperti trading perpetual futures)", key="use_funding",
-                            help="Biaya/pendapatan tiap 8 jam dari riwayat funding Binance. Long bayar kalau funding positif, short menerima.")
-            else:
-                st.checkbox("Hitung swap (biaya menginap)", key="use_swap",
-                            help="Perkiraan swap broker per tahun, dihitung sesuai lama posisi dibuka (termasuk akhir pekan).")
-                if ss.use_swap:
-                    s1, s2 = st.columns(2)
-                    s1.number_input("Swap Long (%/tahun, + = bayar)", -20.0, 20.0, step=0.25, key="swap_long", on_change=_remember_costs)
-                    s2.number_input("Swap Short (%/tahun, + = bayar)", -20.0, 20.0, step=0.25, key="swap_short", on_change=_remember_costs)
-                    st.caption("Lihat angka swap di spesifikasi kontrak brokermu. Contoh: kalau broker memotong 2% setahun untuk Long, isi 2.")
-        st.multiselect("Jenis strategi yang dicari", list(E.FAMILIES), key="families", format_func=lambda k: E.FAMILIES[k]["name"])
-        bad_tf = [E.FAMILIES[f]["name"] for f in ss.families if E.FAMILIES[f]["intraday"] and TF_MINUTES.get(tf, 60) > 60]
-        if bad_tf:
-            st.caption(f"Dilewati di timeframe ini (butuh timeframe ≤ 1 jam): {', '.join(bad_tf)}.")
-        st.caption("Exit ikut dicoba otomatis: 14 jenis stop loss, 10 jenis take profit, TP1/TP2 + breakeven, 8 jenis trailing, "
-                   "time stop, tutup akhir hari / akhir pekan, jeda setelah rugi, batas harian. Filter ADX juga ikut dicoba.")
-        exit_pick = V7.render_exit_pick()
-        m1, m2 = st.columns(2)
-        m1.radio("Mode penilaian", ["ketat", "vela"], key="mode", horizontal=True,
-                 format_func=lambda k: {"ketat": "Ketat (disarankan)", "vela": "Mode Vela (longgar)"}[k],
-                 help="Ketat: harus lolos data unseen + walk-forward + stabilitas parameter + tidak overfit. "
-                      "Vela: cukup lolos target di data lama dan data unseen.")
-        m2.radio("Cara mencari", ["random", "evo"], key="algo", horizontal=True,
-                 format_func=lambda k: {"random": "Acak", "evo": "Evolusi (lebih cepat ketemu)"}[k],
-                 help="Evolusi: setelah 25% percobaan acak, variasi yang bagus di data lama diubah sedikit-sedikit. "
-                      "Data unseen tidak pernah dipakai untuk memilih. Semua percobaan tetap dihitung di Deflated Sharpe.")
-        st.checkbox("Kombinasi dengan filter konfirmasi (sesi, hari, tren timeframe besar, volatilitas, RSI, volume)", key="combo",
-                    help="Sinyal masuk hanya diambil kalau filter konfirmasi juga setuju. Lebih banyak kombinasi = peluang kebetulan juga naik.")
-        if ss.mode == "vela":
-            st.warning("Mode Vela: hasil 'lolos' lebih mungkin cuma kebetulan (tanpa cek walk-forward & stabilitas). "
-                       "Lihat kolom DSR % dan nilai (grade) sebelum percaya.")
-        d1, d2 = st.columns(2)
-        d1.select_slider("Jumlah variasi yang dicoba", [500, 1000, 2000, 3000, 5000, 10000, 20000], key="n_variants")
-        d2.select_slider("Batas waktu (detik)", [30, 60, 120, 300, 600], key="time_budget")
+            st.subheader("Pengaturan backtest")
+            a, b, c = st.columns(3)
+            with a:
+                st.radio("Arah trade", ["both", "long", "short"], key="direction", format_func=DIR_LABEL.get, horizontal=True)
+                st.slider("Data 'unseen' / out-of-sample (%)", 10, 50, key="oos_pct",
+                          help="Bagian data paling baru yang TIDAK dipakai saat mencari. Strategi harus tetap bagus di sini.")
+                st.slider("Jumlah periode walk-forward", 2, 8, key="folds",
+                          help="Data in-sample dibagi beberapa periode; strategi harus untung di sebagian besar periode.")
+                st.slider("Minimal periode yang untung (%)", 0, 100, key="min_wf")
+            with b:
+                st.number_input("Profit factor minimal", 1.0, 5.0, step=0.1, key="min_pf")
+                st.number_input("Win rate minimal (%)", 0.0, 90.0, step=5.0, key="min_wr")
+                st.number_input("Drawdown maksimal (%)", 1.0, 90.0, step=1.0, key="max_dd")
+                st.number_input("Jumlah trade minimal (in-sample)", 5, 2000, step=10, key="min_trades")
+                st.number_input("Profit factor minimal di data unseen", 0.5, 5.0, step=0.1, key="oos_min_pf")
+            with c:
+                if ss.source == "binance":
+                    st.selectbox("Preset biaya", list(CRYPTO_PRESETS), key="crypto_preset", on_change=_apply_preset,
+                                 help="Contoh tarif umum. Angka di bawah tetap bisa diubah.")
+                    st.number_input("Fee per transaksi (%)", 0.0, 1.0, step=0.01, key="fee")
+                    st.number_input("Slippage per transaksi (%)", 0.0, 1.0, step=0.01, key="slip")
+                else:
+                    pip = src.pip_size(symbol) or 0.0001
+                    st.selectbox("Preset akun broker", list(FX_PRESETS), key="fx_preset", on_change=_apply_preset,
+                                 help="Contoh saja (bukan broker tertentu). Spread disimpan per pasar selama sesi ini dan tetap bisa diubah.")
+                    st.number_input(f"Spread {symbol} (pip) · 1 pip = {pip:g}", 0.0, 50.0, step=0.1, key="spread", on_change=_remember_costs)
+                    st.number_input("Slippage per sisi (pip)", 0.0, 20.0, step=0.1, key="fx_slip")
+                    st.number_input("Komisi per sisi (%)", 0.0, 0.5, step=0.001, format="%.3f", key="fx_comm")
+                st.number_input("Ukuran posisi (x modal, 1 = tanpa leverage)", 0.1, 20.0, step=0.5, key="lev")
+                st.checkbox("Rapor pakai DSR versi ketat (buku teks)", key="strict_dsr",
+                            help="Anggap semua variasi yang dicoba benar-benar terpisah. Nilai rapor jadi lebih pelit. Bisa diubah kapan saja.")
+                st.slider("Minimal parameter tetangga yang tetap untung (%)", 0, 100, key="min_stab",
+                          help="Kalau EMA 11/36 bagus tapi 12/35 hancur, berarti cuma kebetulan.")
+                if ss.source == "binance":
+                    st.checkbox("Hitung funding rate (seperti trading perpetual futures)", key="use_funding",
+                                help="Biaya/pendapatan tiap 8 jam dari riwayat funding Binance. Long bayar kalau funding positif, short menerima.")
+                else:
+                    st.checkbox("Hitung swap (biaya menginap)", key="use_swap",
+                                help="Perkiraan swap broker per tahun, dihitung sesuai lama posisi dibuka (termasuk akhir pekan).")
+                    if ss.use_swap:
+                        s1, s2 = st.columns(2)
+                        s1.number_input("Swap Long (%/tahun, + = bayar)", -20.0, 20.0, step=0.25, key="swap_long", on_change=_remember_costs)
+                        s2.number_input("Swap Short (%/tahun, + = bayar)", -20.0, 20.0, step=0.25, key="swap_short", on_change=_remember_costs)
+                        st.caption("Lihat angka swap di spesifikasi kontrak brokermu. Contoh: kalau broker memotong 2% setahun untuk Long, isi 2.")
+            st.multiselect("Jenis strategi yang dicari", list(E.FAMILIES), key="families", format_func=lambda k: E.FAMILIES[k]["name"])
+            bad_tf = [E.FAMILIES[f]["name"] for f in ss.families if E.FAMILIES[f]["intraday"] and TF_MINUTES.get(tf, 60) > 60]
+            if bad_tf:
+                st.caption(f"Dilewati di timeframe ini (butuh timeframe ≤ 1 jam): {', '.join(bad_tf)}.")
+            st.caption("Exit ikut dicoba otomatis: 14 jenis stop loss, 10 jenis take profit, TP1/TP2 + breakeven, 8 jenis trailing, "
+                       "time stop, tutup akhir hari / akhir pekan, jeda setelah rugi, batas harian. Filter ADX juga ikut dicoba.")
+            exit_pick = V7.render_exit_pick()
+            m1, m2 = st.columns(2)
+            m1.radio("Mode penilaian", ["ketat", "vela"], key="mode", horizontal=True,
+                     format_func=lambda k: {"ketat": "Ketat (disarankan)", "vela": "Mode Vela (longgar)"}[k],
+                     help="Ketat: harus lolos data unseen + walk-forward + stabilitas parameter + tidak overfit. "
+                          "Vela: cukup lolos target di data lama dan data unseen.")
+            m2.radio("Cara mencari", ["random", "evo"], key="algo", horizontal=True,
+                     format_func=lambda k: {"random": "Acak", "evo": "Evolusi (lebih cepat ketemu)"}[k],
+                     help="Evolusi: setelah 25% percobaan acak, variasi yang bagus di data lama diubah sedikit-sedikit. "
+                          "Data unseen tidak pernah dipakai untuk memilih. Semua percobaan tetap dihitung di Deflated Sharpe.")
+            st.checkbox("Kombinasi dengan filter konfirmasi (sesi, hari, tren timeframe besar, volatilitas, RSI, volume)", key="combo",
+                        help="Sinyal masuk hanya diambil kalau filter konfirmasi juga setuju. Lebih banyak kombinasi = peluang kebetulan juga naik.")
+            if ss.mode == "vela":
+                st.warning("Mode Vela: hasil 'lolos' lebih mungkin cuma kebetulan (tanpa cek walk-forward & stabilitas). "
+                           "Lihat kolom DSR % dan nilai (grade) sebelum percaya.")
+            d1, d2 = st.columns(2)
+            d1.select_slider("Jumlah variasi yang dicoba", [500, 1000, 2000, 3000, 5000, 10000, 20000], key="n_variants")
+            d2.select_slider("Batas waktu (detik)", [30, 60, 120, 300, 600], key="time_budget")
 
-        if deriv_on():
-            st.caption("📊 Data derivatif aktif: 3 jenis strategi baru (funding ekstrem, open interest vs harga, order flow taker) dan "
-                       "3 filter tambahan (funding, order flow, open interest) ikut dicari. Strategi yang memakainya tidak bisa diekspor ke Pine. "
-                       "Open interest & long/short baru ada sejak ±Sep 2020, funding sejak Sep 2019; sebelum itu filter/strategi ini tidak memberi sinyal.")
+            if deriv_on():
+                st.caption("📊 Data derivatif aktif: 3 jenis strategi baru (funding ekstrem, open interest vs harga, order flow taker) dan "
+                           "3 filter tambahan (funding, order flow, open interest) ikut dicari. Strategi yang memakainya tidak bisa diekspor ke Pine. "
+                           "Open interest & long/short baru ada sejak ±Sep 2020, funding sejak Sep 2019; sebelum itu filter/strategi ini tidak memberi sinyal.")
     _force = False
     _jid0 = ss.get("job_search")
     _st0 = J.status(_jid0)
@@ -714,7 +716,7 @@ with t_search:
                     _key["nonce"] = time.time()
                     cfg["seed"] = J.seed_of(_key)
                     _jid = J.job_id("search", _key)
-                if J.status(_jid) is None:
+                if J.status(_jid) is None or J.status(_jid)["state"] == "gagal":   # failed before -> allow a retry
                     cc0, carry_info = make_cache(dfc, cfg, symbol, tf)      # needs the page (cached funding data) -> before the thread
                     _dinfo = df.attrs.get("deriv_info")
                     _sym, _tf, _src, _start = symbol, tf, ss.source, str(start_date)
@@ -789,7 +791,8 @@ if ADV == "scan":
         _sj = ss.get("job_scan")
         _sst = J.status(_sj)
         _srun = bool(_sst and _sst["state"] in ("antri", "jalan"))
-        if st.button("⏳ Scan sedang berjalan..." if _srun else "🛰️ Mulai scan", type="primary", disabled=n_jobs == 0 or _srun):
+        if st.button("⏳ Scan sedang berjalan..." if _srun else "🛰️ Mulai scan", type="primary", disabled=n_jobs == 0 or _srun,
+                     width='stretch'):
             base = dict(families=ss.families or list(E.FAMILIES), n_variants=int(scan_var), direction=ss.direction, oos_pct=ss.oos_pct,
                         folds=ss.folds, min_pf=ss.min_pf, min_wr=ss.min_wr / 100, max_dd=ss.max_dd / 100, min_trades=ss.min_trades,
                         min_wf=ss.min_wf / 100, min_stab=ss.min_stab / 100, oos_min_pf=ss.oos_min_pf, lev=ss.lev,
@@ -817,7 +820,7 @@ if ADV == "scan":
             _save_session()
             _sst = J.status(_sj)
         if _sst and _sst["state"] in ("antri", "jalan"):
-            job_panel(_sj, "Scan pasar")
+            job_panel(_sj, "Scan pasar", done_tab="🧰 Alat lanjutan")
         elif _sst and _sst["state"] == "gagal":
             st.error("Scan gagal: " + (_sst.get("error") or "").split("\n")[0])
         elif _sst and _sst["state"] == "selesai" and ss.get("scan_job") != _sj:
@@ -1116,10 +1119,10 @@ with t_res:
 def _res_data():
     res = ss.get("res")
     if not res:
-        st.info("Jalankan pencarian di tab 'Cari Strategi' dulu.")
+        st.info("Jalankan pencarian di tab '🔬 Cari strategi' dulu.")
         return None
     if res["symbol"] != symbol or res["tf"] != tf:
-        st.warning(f"Pilih lagi {res['symbol']} {res['tf']} di sidebar untuk halaman ini.")
+        st.warning(f"Hasil ini untuk {res['symbol']} {res['tf']}. Pilih lagi pasar {res['symbol']} dan timeframe {res['tf']} di bagian atas halaman.")
         return None
     df = get_data(show=False)
     if df is None:
@@ -1190,13 +1193,17 @@ if ADV == "sig":
 def _open_hist(jid):
     r = J.result(jid)
     if not r:
-        ss.hist_msg = "Hasil ini sudah tidak ada (dihapus setelah 24 jam atau server dimulai ulang)."
+        ss.hist_err = "Hasil ini sudah tidak ada (dihapus setelah 24 jam atau server dimulai ulang)."
         return
-    if J.status(jid) and J._meta(jid).get("kind") == "scan":
+    kind = J._meta(jid).get("kind")
+    if kind == "scan":
         ss.scan_rows, ss.scan_results = r
         ss.scan_job = ss.job_scan = jid
         ss.adv_tool = "scan"
-        ss.hist_msg = "Hasil scan dibuka di tab '🧰 Alat lanjutan'."
+        ss.nav_to = "🧰 Alat lanjutan"
+        return
+    if kind not in (None, "", "search") or not isinstance(r, dict) or "out" not in r:
+        ss.hist_err = "Item ini bukan hasil pencarian strategi, jadi tidak bisa dibuka di tab '📊 Hasil'."
         return
     ss.res, ss.res_job, ss.job_search, ss.sel, ss.res_scan = r, jid, jid, None, None
     if r.get("source") in SOURCES:
@@ -1210,13 +1217,16 @@ with t_hist:
                "Kalau server gratis dimulai ulang, riwayat ikut hilang.")
     if ss.get("hist_msg"):
         st.success(ss.pop("hist_msg"))
-    _h = J.history(limit=25)
+    if ss.get("hist_err"):
+        st.warning(ss.pop("hist_err"))
+    # tool jobs (random-price test, WFO, report, ...) are stored too, but only searches & scans can be opened here
+    _h = [m for m in J.history(limit=200) if m.get("kind") in (None, "", "search", "scan")][:25]
     if not _h:
         st.info("Belum ada riwayat.")
     for _m in _h:
         _c1, _c2 = st.columns([4, 1])
         _when = pd.Timestamp(_m.get("finished") or _m.get("started"), unit="s", tz="UTC").tz_convert(TZ).strftime("%d %b %H:%M")
-        _c1.markdown(f"**{_m.get('label') or _m['id']}**  \n{'Scan' if _m.get('kind') == 'scan' else 'Pencarian'} · selesai {_when} WIB")
+        _c1.markdown(f"**{_m.get('label') or _m['id']}**  \n{'Scan' if _m.get('kind') == 'scan' else 'Pencarian'}{' · ⏹️ hasil sementara' if _m.get('partial') else ''} · selesai {_when} WIB")
         _c2.button("Buka", key=f"h_{_m['id']}", on_click=_open_hist, args=(_m["id"],), width='stretch')
 
 with t_help:

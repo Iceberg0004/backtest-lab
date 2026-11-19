@@ -67,7 +67,21 @@ CSS = f"""<style>
   [data-testid="stMetricValue"] {{font-size: 1.05rem !important;}}
   [data-testid="stMetric"] {{padding: .45rem .55rem !important;}}
   [data-testid="stMetricLabel"] p {{font-size: .78rem;}}
+  /* tester round: settings inputs one per row (50% columns were too narrow for number inputs / sliders) */
+  .st-key-setx [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{min-width: 100% !important; width: 100% !important; flex: 1 1 100% !important;}}
+  /* bigger touch targets: tabs, checkboxes, radios, expander headers */
+  .stTabs [data-baseweb="tab"] {{min-height: 2.6rem;}}
+  .stTabs [data-baseweb="tab-list"] {{overflow-x: auto; scrollbar-width: none;}}
+  [data-testid="stCheckbox"] label, [data-testid="stRadio"] label {{min-height: 2.2rem; align-items: center;}}
+  [data-testid="stExpander"] summary {{min-height: 2.8rem;}}
+  .stButton button, .stDownloadButton button {{width: 100%;}}
+  /* progress text readable on a phone */
+  [data-testid="stProgress"] p {{font-size: .9rem; white-space: normal;}}
+  /* tables never push the page sideways */
+  [data-testid="stDataFrame"], [data-testid="stTable"] {{max-width: 100%; overflow-x: auto;}}
 }}
+/* Stop button stands out while a search runs */
+[class*="st-key-stop_"] button {{background: #DC2626 !important; color: #fff !important; border: 0 !important; min-height: 3rem; font-weight: 700;}}
 </style>"""
 
 
