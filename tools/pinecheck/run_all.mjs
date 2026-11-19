@@ -25,7 +25,7 @@ for (const f of files) {
     const exp = c.strat_expect;
     const recs = arr.map(t => [t.entry_bar_index ?? t.entryBarIndex ?? t.entry_bar, t.exit_bar_index ?? t.exitBarIndex ?? t.exit_bar,
                                t.entry_price ?? t.entryPrice, t.exit_price ?? t.exitPrice]);
-    recs.sort((a, b) => (a[1] - b[1]) || (a[0] - b[0]));
+    recs.sort((a, b) => (a[1] - b[1]) || (a[0] - b[0]) || (a[3] - b[3]));
     let same = 0, prices = 0, firstBad = null, ambDiff = 0;
     for (let i = 0; i < Math.min(recs.length, exp.length); i++) {
       const [eb, xb, ep, xp] = recs[i], e = exp[i];

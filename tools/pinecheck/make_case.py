@@ -28,21 +28,25 @@ def data(src, sym):
 
 
 def expect_strategy(tr, p):
-    """Python trades -> TradingView closed-trade records. Each partial TP is its own record. A stop-out also fills every
-    partial-TP order still pending (those orders carry the stop too) = one extra record each.
-    Known: in ~4% of multi-partial cases TradingView merges/skips a leg; the indicator() twin stays exact."""
+    """Python trades -> TradingView closed-trade records. With partial TPs the strategy() export opens one entry per
+    portion (TP1 leg, TP2 leg, main leg), so every leg is its own record: a leg closes at its partial target if that was
+    hit, otherwise together with the main leg at the final exit. A trade still open at the last candle stays open in
+    TradingView (only legs already closed are records)."""
+    p = E.full_params(p)
+    f1, f2 = float(p["tp1_f"]), float(p["tp2_f"])
     out = []
     for k in range(len(tr["ent"])):
-        rec = (int(tr["ent"][k]), int(tr["ex"][k]), float(tr["ep"][k]), float(tr["xp"][k]), int(tr["amb"][k]))
-        done = 0
-        for b_, p_ in (("p1b", "p1p"), ("p2b", "p2p")):
+        e, x, ep, xp, amb = int(tr["ent"][k]), int(tr["ex"][k]), float(tr["ep"][k]), float(tr["xp"][k]), int(tr["amb"][k])
+        nl = int(tr["npart"][k]); rest = 1.0 - (f1 if nl >= 1 else 0.0) - (f2 if nl >= 2 else 0.0)
+        legs = [("p1b", "p1p")] * (nl >= 1) + [("p2b", "p2p")] * (nl >= 2)
+        for b_, p_ in legs:
             if tr[b_][k] >= 0:
-                out.append((int(tr["ent"][k]), int(tr[b_][k]), float(tr["ep"][k]), float(tr[p_][k]), 0)); done += 1
-        if tr["reason"][k] != 3:
-            out.append(rec)
-            if tr["reason"][k] == 1:
-                out += [rec] * (int(tr["npart"][k]) - done)
-    out.sort(key=lambda r: (r[1], r[0]))
+                out.append((e, int(tr[b_][k]), ep, float(tr[p_][k]), 0))
+            elif tr["reason"][k] != 3:
+                out.append((e, x, ep, xp, amb))
+        if tr["reason"][k] != 3 and rest > 1e-9:
+            out.append((e, x, ep, xp, amb))
+    out.sort(key=lambda r: (r[1], r[0], r[3]))
     return out
 
 
@@ -90,6 +94,12 @@ v7 += [dict(sl_mode=0, sl_atr=2.0, tp_mode=1, tp_rr=4.0, tp1_r=1.0, tp1_f=0.33, 
        dict(sl_mode=0, sl_atr=1.5, tp_mode=1, tp_rr=2.0, cool=6, max_day=1, reent=1, wkend=1),
        dict(sl_mode=1, sl_pct=0.5, tp_mode=3, tp_pct=1.0, dloss=1.0, dprof=1.5, eod=2, max_bars=24),
        dict(sl_mode=0, sl_atr=2.0, tp_mode=1, tp_rr=3.0, eod=3, wkend=1, cool=3)]
+# v9: partial take-profit legs (TP1/TP2 + breakeven, full split with no main leg, trailing after TP1, short only)
+v7 += [dict(sl_mode=0, sl_atr=1.5, tp_mode=1, tp_rr=3.0, tp1_r=0.8, tp1_f=0.5, tp2_r=1.6, tp2_f=0.25, be_r=0.8, be_off=0.0),
+       dict(sl_mode=0, sl_atr=2.0, tp_mode=1, tp_rr=3.0, tp1_r=1.0, tp1_f=0.5, tp2_r=2.0, tp2_f=0.5, be_r=1.0, be_off=0.1),
+       dict(sl_mode=1, sl_pct=0.4, tp_mode=0, tp_atr=0.0, tp1_r=1.0, tp1_f=0.3, tp2_r=2.5, tp2_f=0.3, trail_atr=2.0, trail_mode=1, trail_act=1.0),
+       dict(sl_mode=0, sl_atr=1.0, tp_mode=1, tp_rr=1.2, tp1_r=1.5, tp1_f=0.5, tp2_r=2.0, tp2_f=0.3),
+       dict(sl_mode=0, sl_atr=2.0, tp_mode=1, tp_rr=4.0, tp1_r=0.5, tp1_f=0.2, tp2_r=1.0, tp2_f=0.2, be_r=0.5, max_bars=30)]
 for k, ex in enumerate(v7):
     src, sym = mk[k % 3].split(":")
     cases.append((src, sym, "ma_cross", dict(base, fast=8, slow=30, **ex), "both"))
