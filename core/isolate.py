@@ -4,7 +4,7 @@ trains there, sends back only the small result, then exits. So scikit-learn and 
 stay in the long-running app process (the free cloud has ~1 GB RAM). Falls back to running in-process if
 fork is unavailable or the child dies without an answer."""
 from __future__ import annotations
-import os, time
+import gc, os, time
 
 
 def _call(fn, args, kwargs, progress):
@@ -28,10 +28,19 @@ def run(fn, *args, progress=None, timeout=900, **kwargs):
         finally:
             wr.close()
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)   # "process is multi-threaded" notice from fork
-        p = ctx.Process(target=child, daemon=True)
-        p.start()
+    # gc.freeze(): move every existing object to the permanent generation before forking, so the child's garbage
+    # collector never walks (and writes to) the parent's objects. Those writes made the kernel copy the touched pages
+    # into the child (copy-on-write), which is the transient RAM peak while a child runs. The parent unfreezes
+    # right after the fork, so its own collection is unchanged.
+    gc.collect()
+    gc.freeze()
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)   # "process is multi-threaded" notice from fork
+            p = ctx.Process(target=child, daemon=True)
+            p.start()
+    finally:
+        gc.unfreeze()
     wr.close()
     deadline = time.time() + timeout
     try:
