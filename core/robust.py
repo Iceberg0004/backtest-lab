@@ -258,7 +258,7 @@ def effective_trials(M):
     if M.ndim != 2 or M.shape[0] < 3:
         return None
     keep = np.concatenate([np.asarray(M[i:i + 64], float).std(1) > 0 for i in range(0, len(M), 64)])
-    M = np.asarray(M[keep], float)
+    M = M[keep]                       # np.corrcoef converts to float64 itself (same values), so no extra copy here
     if len(M) < 3:
         return None
     ev = np.clip(np.linalg.eigvalsh(np.corrcoef(M)), 0, None)
