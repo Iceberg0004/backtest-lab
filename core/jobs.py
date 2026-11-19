@@ -50,9 +50,31 @@ def status(jid):
             return dict(s)
     if os.path.exists(_p(jid, "pkl")):
         return dict(state="selesai", frac=1.0, text="Selesai", **_meta(jid))
+    if _rehydrate(jid):
+        return dict(state="selesai", frac=1.0, text="Selesai", **_meta(jid))
     if os.path.exists(_p(jid, "err")):
         return dict(state="gagal", frac=1.0, text="Gagal", error=open(_p(jid, "err")).read()[-600:], **_meta(jid))
     return None
+
+
+def _rehydrate(jid):
+    """v9: a result that was cleaned from the job folder (24 h) but is still in the archive -> put it back."""
+    if os.path.exists(_p(jid, "pkl")):
+        return True
+    try:
+        from . import archive
+        if not archive.has(jid):
+            return False
+        meta, raw = archive.get(jid)
+        archive.safe_loads(raw)
+        tmp = _p(jid, f"tmp{uuid.uuid4().hex[:6]}")
+        with open(tmp, "wb") as f:
+            f.write(raw)
+        os.replace(tmp, _p(jid, "pkl"))
+        json.dump(meta, open(_p(jid, "json"), "w"), default=str)
+        return True
+    except Exception:
+        return False
 
 
 def _trim():
@@ -137,6 +159,13 @@ def start(jid, fn, label="", kind="", heavy=True, extra_meta=None):
                 pass
             json.dump(meta, open(_p(jid, "json"), "w"), default=str)
             del res
+            if kind in ("search", "scan"):     # v9: also keep it beyond the 24 h folder (core/archive.py)
+                try:
+                    from . import archive
+                    with open(_p(jid, "pkl"), "rb") as f:
+                        archive.put(meta, f.read())
+                except Exception:
+                    pass
         except Exception as e:
             open(_p(jid, "err"), "w").write(f"{type(e).__name__}: {e}\n" + traceback.format_exc()[-1500:])
         finally:
@@ -152,6 +181,7 @@ def start(jid, fn, label="", kind="", heavy=True, extra_meta=None):
 
 
 def result(jid):
+    _rehydrate(jid)
     try:
         with open(_p(jid, "pkl"), "rb") as f:
             return pickle.load(f)
@@ -183,6 +213,12 @@ def history(kind=None, limit=30):
         if not os.path.exists(_p(m["id"], "pkl")):
             continue
         out.append(m)
+    try:                                   # v9: plus results kept in the archive after the 24 h clean-up
+        from . import archive
+        seen = {m["id"] for m in out}
+        out += [m for m in archive.listing() if m.get("id") not in seen and (not kind or m.get("kind") == kind)]
+    except Exception:
+        pass
     out.sort(key=lambda m: m.get("finished") or m.get("started") or 0, reverse=True)
     return out[:limit]
 
